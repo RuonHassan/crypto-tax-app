@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 // Add CSS import for animations if not already included in your app
 import './styles/animations.css';
 
@@ -21,6 +21,12 @@ import calculateTaxes from './calculateTaxes';
 import priceService from './services/priceService';
 
 import TransactionDashboard from './components/TransactionDashboard.js';
+
+// Import services
+import WalletProcessingService from './services/wallet/walletProcessingService';
+import TransactionService from './services/wallet/transactionService';
+import CacheService from './services/cache/cacheService';
+import TaxCalculationService from './services/tax/taxCalculationService';
 
 const CACHE_KEY_PREFIX = 'solana_tx_';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -162,6 +168,21 @@ function App() {
     processingAll: false
   });
   
+  // Initialize services
+  const services = useMemo(() => {
+    const cacheService = new CacheService();
+    const transactionService = new TransactionService(RATE_LIMIT);
+    const walletProcessingService = new WalletProcessingService(cacheService, transactionService);
+    const taxCalculationService = new TaxCalculationService();
+    
+    return {
+      cache: cacheService,
+      transaction: transactionService,
+      walletProcessing: walletProcessingService,
+      taxCalculation: taxCalculationService
+    };
+  }, []);
+  
   // Set app as loaded after a small delay
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -251,73 +272,39 @@ function App() {
   
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const clearAllTransactionCache = () => {
-    console.log('Clearing all transaction cache...');
-    // First, find all localStorage keys that start with our cache prefix
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(CACHE_KEY_PREFIX)) {
-        keysToRemove.push(key);
-      }
-    }
-    
-    // Then remove them
-    keysToRemove.forEach(key => {
-      localStorage.removeItem(key);
-    });
-    
-    console.log(`Cleared ${keysToRemove.length} cached items`);
-    setTransactions([]);
-    setResults(null);
-    setLoadingProgress(0);
-  };
-
   const clearTransactionCache = () => {
-    // Only clear cache for valid wallet addresses
-    const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
-    
-    if (validWalletAddresses.length === 0) {
-      alert('Please add valid wallet addresses first.');
-      return;
+    if (selectedWallet === 'all') {
+      return clearAllTransactionCache();
     }
     
-    // Clear cache for these wallet addresses
-    validWalletAddresses.forEach(address => {
-      const cacheKey = `${address}_${getFiscalYearDates().startDate.getTime()}`;
-      localStorage.removeItem(CACHE_KEY_PREFIX + cacheKey);
-    });
+    // Clear cache for the selected wallet
+    services.cache.clearTransactionCache(selectedWallet);
     
-    // Set bypassCache to true for the next analyze
+    // Force re-analysis
     setBypassCache(true);
     
-    // Reset transactions and results
-    setTransactions([]);
-    setResults(null);
-    setLoadingProgress(0);
+    if (window.confirm('Cache cleared. Would you like to re-analyze the wallet now?')) {
+      analyzeTaxes(selectedWallet);
+    }
+  };
+  
+  const clearAllTransactionCache = () => {
+    const count = services.cache.clearAllTransactionCache();
     
-    alert('Cache cleared. Click "Calculate All Taxes" to refresh the data.');
+    // Force re-analysis
+    setBypassCache(true);
+    
+    if (window.confirm(`Cleared ${count} cache entries. Would you like to re-analyze all wallets now?`)) {
+      analyzeTaxes();
+    }
   };
 
   const getFromCache = (key) => {
-    if (bypassCache) return null;
-    
-    const cached = localStorage.getItem(CACHE_KEY_PREFIX + key);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_DURATION) {
-        return data;
-      }
-      localStorage.removeItem(CACHE_KEY_PREFIX + key);
-    }
-    return null;
+    return services.cache.getFromCache(key);
   };
 
   const saveToCache = (key, data) => {
-    localStorage.setItem(CACHE_KEY_PREFIX + key, JSON.stringify({
-      data,
-      timestamp: Date.now()
-    }));
+    return services.cache.saveToCache(key, data);
   };
 
   const fetchWithRetry = async (fn, maxRetries = RATE_LIMIT.MAX_RETRIES, initialDelay = RATE_LIMIT.INITIAL_BACKOFF) => {
@@ -675,29 +662,17 @@ function App() {
 
   // Fetch current wallet balance directly from blockchain
   const fetchCurrentBalance = async (walletAddress) => {
-    try {
-      console.log('Fetching current balance for:', walletAddress);
-      const connection = new Connection(SOLANA_RPC_ENDPOINT, 'confirmed');
-      
-      const pubKey = new PublicKey(walletAddress);
-      const balance = await connection.getBalance(pubKey);
-      
-      // Convert lamports to SOL
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      console.error('Error fetching current balance:', error);
-      return null;
-    }
+    return services.transaction.fetchCurrentBalance(walletAddress);
   };
 
   // Fetch all wallet balances
   const fetchAllWalletBalances = async () => {
-    const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
+    const addresses = formData.walletAddresses.filter(addr => addr.length >= 32);
     const walletBalances = {};
     
-    for (const address of validWalletAddresses) {
+    for (const address of addresses) {
       try {
-        const balance = await fetchCurrentBalance(address);
+        const balance = await services.transaction.fetchCurrentBalance(address);
         if (balance !== null) {
           walletBalances[address] = balance;
         }
@@ -715,30 +690,12 @@ function App() {
 
   // Function to add a wallet to the processing queue if there's already one being processed
   const queueWalletForProcessing = (walletAddress) => {
-    if (walletAddress.length < 32) {
-      alert('Please enter a valid Solana wallet address (minimum 32 characters)');
-      return false;
-    }
-
-    // Check if a wallet is currently being processed
-    if (walletProcessingStatus.currentWallet) {
-      // If this wallet is already in the queue or completed, no need to add it again
-      if (walletProcessingStatus.queuedWallets.includes(walletAddress) || 
-          walletProcessingStatus.completedWallets.includes(walletAddress)) {
-        return false;
-      }
-      
-      // Add the wallet to the queue
-      setWalletProcessingStatus(prev => ({
-        ...prev,
-        queuedWallets: [...prev.queuedWallets, walletAddress]
-      }));
-      return true; // Wallet was successfully queued
-    }
-    
-    // If no wallet is currently being processed, process this one immediately
-    analyzeTaxes(walletAddress);
-    return false; // Wallet was not queued, but processed immediately
+    return services.walletProcessing.queueWalletForProcessing(
+      walletAddress, 
+      walletProcessingStatus,
+      setWalletProcessingStatus,
+      analyzeTaxes
+    );
   };
 
   // Function to analyze taxes with updated wallet balance fetching
