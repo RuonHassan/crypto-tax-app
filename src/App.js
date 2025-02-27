@@ -121,6 +121,12 @@ function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showLandingPage, setShowLandingPage] = useState(true);
   const [bypassCache, setBypassCache] = useState(false);
+  // Add state for rate limiting info
+  const [rateLimitInfo, setRateLimitInfo] = useState({
+    isLimited: false,
+    retryCount: 0,
+    totalDelays: 0
+  });
   
   // Add onboarding step tracking
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -156,6 +162,16 @@ function App() {
   // Skip traditional income and go to dashboard
   const skipToResults = () => {
     setOnboardingStep(3);
+  };
+
+  // Go back to previous step
+  const goBackToPreviousStep = () => {
+    if (onboardingStep > 1) {
+      setOnboardingStep(onboardingStep - 1);
+    } else {
+      setShowLandingPage(true);
+      setOnboardingStep(0);
+    }
   };
 
   // Handle wallet name changes
@@ -273,6 +289,14 @@ function App() {
         if (retries > maxRetries || !error.message?.includes('429')) {
           throw error;
         }
+        
+        // Update rate limit info for UI feedback
+        setRateLimitInfo(prev => ({
+          isLimited: true,
+          retryCount: retries,
+          totalDelays: prev.totalDelays + 1
+        }));
+        
         console.log(`Rate limited. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
         await sleep(delay);
         delay *= 2; // Exponential backoff
@@ -611,6 +635,12 @@ function App() {
     setLoading(true);
     setLoadingProgress(0);
     setBypassCache(false); // Reset bypass flag for future runs
+    // Reset rate limiting info
+    setRateLimitInfo({
+      isLimited: false,
+      retryCount: 0,
+      totalDelays: 0
+    });
     
     try {
       let allTransactions = [];
@@ -820,51 +850,55 @@ function App() {
                   
                   {formData.walletAddresses.map((address, index) => (
                     <div key={index} className="mb-6">
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                          Wallet Name
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.walletNames[index] || `Wallet ${index + 1}`}
-                          onChange={(e) => handleWalletNameChange(index, e.target.value)}
-                          className="input"
-                          placeholder="My Main Wallet"
-                        />
-                      </div>
-                      <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                        Solana Wallet Address
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={address}
-                          onChange={(e) => {
-                            const updatedAddresses = [...formData.walletAddresses];
-                            updatedAddresses[index] = e.target.value;
-                            handleInputChange({ 
-                              target: { name: 'walletAddresses', value: updatedAddresses }
-                            });
-                          }}
-                          className="input"
-                          placeholder="Solana Wallet Address"
-                        />
-                        {index > 0 && (
-                          <button
-                            onClick={() => {
-                              const updatedAddresses = formData.walletAddresses.filter((_, i) => i !== index);
-                              const updatedNames = formData.walletNames.filter((_, i) => i !== index);
-                              setFormData(prev => ({
-                                ...prev,
-                                walletAddresses: updatedAddresses,
-                                walletNames: updatedNames
-                              }));
-                            }}
-                            className="px-4 py-2 bg-rose-100 text-rose-600 dark:bg-rose-900 dark:text-rose-300 rounded-lg hover:bg-rose-200 dark:hover:bg-rose-800 transition-colors"
-                          >
-                            Remove
-                          </button>
-                        )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+                        <div>
+                          <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                            Wallet Name
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.walletNames[index] || `Wallet ${index + 1}`}
+                            onChange={(e) => handleWalletNameChange(index, e.target.value)}
+                            className="input w-full"
+                            placeholder="My Main Wallet"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                            Solana Wallet Address
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={address}
+                              onChange={(e) => {
+                                const updatedAddresses = [...formData.walletAddresses];
+                                updatedAddresses[index] = e.target.value;
+                                handleInputChange({ 
+                                  target: { name: 'walletAddresses', value: updatedAddresses }
+                                });
+                              }}
+                              className="input w-full"
+                              placeholder="Solana Wallet Address"
+                            />
+                            {index > 0 && (
+                              <button
+                                onClick={() => {
+                                  const updatedAddresses = formData.walletAddresses.filter((_, i) => i !== index);
+                                  const updatedNames = formData.walletNames.filter((_, i) => i !== index);
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    walletAddresses: updatedAddresses,
+                                    walletNames: updatedNames
+                                  }));
+                                }}
+                                className="px-4 py-2 bg-rose-100 text-rose-600 dark:bg-rose-900 dark:text-rose-300 rounded-lg hover:bg-rose-200 dark:hover:bg-rose-800 transition-colors"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -973,18 +1007,32 @@ function App() {
                   
                   <div className="flex justify-between">
                     <button
-                      onClick={skipToResults}
+                      onClick={goBackToPreviousStep}
                       className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
                     >
-                      Skip
+                      <span className="flex items-center">
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        Back
+                      </span>
                     </button>
                     
-                    <button
-                      onClick={skipToResults}
-                      className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                    >
-                      Continue to Dashboard
-                    </button>
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={skipToResults}
+                        className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
+                      >
+                        Skip
+                      </button>
+                      
+                      <button
+                        onClick={skipToResults}
+                        className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
+                      >
+                        Continue to Dashboard
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1020,250 +1068,310 @@ function App() {
                 <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay">
                   Track all your assets in one place
                 </p>
+                <button
+                  onClick={goBackToPreviousStep}
+                  className="mt-4 px-6 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-medium hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors inline-flex items-center"
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                  Back to Income Form
+                </button>
               </div>
 
               <div className="max-w-4xl mx-auto px-4 py-8">
-                {loading ? (
-                  <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 transition-all duration-300 hover:shadow-lg animate-fade-in text-center">
-                    <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Loading Your Transaction Data</h2>
-                    <div className="w-full bg-geist-accent-200 dark:bg-geist-accent-700 rounded-full h-4 mb-4">
-                      <div 
-                        className="bg-gradient-to-r from-geist-success to-blue-500 h-4 rounded-full transition-all duration-300" 
-                        style={{ width: `${loadingProgress}%` }}
-                      ></div>
+                {/* Main Form - Always visible */}
+                <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 mb-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
+                  <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Your Information</h2>
+                  
+                  {/* Wallets Section */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Your Wallets</h3>
+                    <div className="space-y-2">
+                      {formData.walletAddresses.map((address, index) => (
+                        address.length >= 32 && (
+                          <div key={index} className="flex justify-between items-center p-3 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-lg">
+                            <div>
+                              <span className="font-medium">{formData.walletNames[index]}</span>
+                              <div className="text-sm text-geist-accent-500">{address.slice(0, 8)}...{address.slice(-8)}</div>
+                            </div>
+                            <div className="text-geist-success">Connected</div>
+                          </div>
+                        )
+                      ))}
                     </div>
-                    <p className="text-geist-accent-600 dark:text-geist-accent-300">
-                      Processing... {loadingProgress.toFixed(0)}%
-                    </p>
-                    <p className="mt-4 text-sm text-geist-accent-500">
-                      We're analyzing your wallets and calculating your taxes. This might take a few minutes for wallets with many transactions.
-                    </p>
                   </div>
-                ) : (
-                  <>
-                    {/* Main Form - Modified to show at step 3 */}
-                    <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 mb-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
-                      <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Your Information</h2>
-                      
-                      {/* Wallets Section */}
-                      <div className="mb-8">
-                        <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Your Wallets</h3>
-                        <div className="space-y-2">
-                          {formData.walletAddresses.map((address, index) => (
-                            address.length >= 32 && (
-                              <div key={index} className="flex justify-between items-center p-3 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-lg">
-                                <div>
-                                  <span className="font-medium">{formData.walletNames[index]}</span>
-                                  <div className="text-sm text-geist-accent-500">{address.slice(0, 8)}...{address.slice(-8)}</div>
-                                </div>
-                                <div className="text-geist-success">Connected</div>
-                              </div>
-                            )
-                          ))}
-                        </div>
-                      </div>
 
-                      {/* Action Buttons */}
-                      <div className="mt-6 flex justify-center gap-4">
-                        <button
-                          onClick={analyzeTaxes}
-                          disabled={loading || formData.walletAddresses.filter(addr => addr.length >= 32).length === 0}
-                          className="px-6 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none"
-                        >
-                          {loading ? (
-                            <span>
-                              Processing... {loadingProgress.toFixed(0)}%
-                            </span>
-                          ) : (
-                            'Calculate All Taxes'
-                          )}
-                        </button>
-                        
-                        {results && (
-                          <button
-                            onClick={clearTransactionCache}
-                            className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                          >
-                            Re-analyze Transactions
-                          </button>
-                        )}
-                        
-                        {results && (
-                          <button
-                            onClick={clearAllTransactionCache}
-                            className="px-6 py-3 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                          >
-                            Clear All Cache
-                          </button>
-                        )}
+                  {/* Action Buttons */}
+                  <div className="mt-6 flex justify-center gap-4">
+                    <button
+                      onClick={analyzeTaxes}
+                      disabled={loading || formData.walletAddresses.filter(addr => addr.length >= 32).length === 0}
+                      className="px-6 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none"
+                    >
+                      {loading ? (
+                        <span>
+                          Processing... {loadingProgress.toFixed(0)}%
+                        </span>
+                      ) : (
+                        'Calculate Taxes'
+                      )}
+                    </button>
+                    
+                    {results && (
+                      <button
+                        onClick={clearTransactionCache}
+                        className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
+                      >
+                        Re-analyze Transactions
+                      </button>
+                    )}
+                    
+                    {results && (
+                      <button
+                        onClick={clearAllTransactionCache}
+                        className="px-6 py-3 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
+                      >
+                        Clear All Cache
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Transaction Status Section - Always visible */}
+                <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 mb-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
+                  <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Transaction Status</h2>
+                  
+                  {loading ? (
+                    <div className="text-center">
+                      <div className="w-full bg-geist-accent-200 dark:bg-geist-accent-700 rounded-full h-4 mb-6">
+                        <div 
+                          className="bg-gradient-to-r from-geist-success to-blue-500 h-4 rounded-full transition-all duration-300" 
+                          style={{ width: `${loadingProgress}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-geist-accent-900 dark:text-geist-foreground font-medium mb-2">
+                        Processing... {loadingProgress.toFixed(0)}%
+                      </p>
+                      <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-4">
+                        We're analyzing your wallet transactions and calculating your taxes.
+                      </p>
+                      
+                      {/* Rate limiting info */}
+                      {rateLimitInfo.isLimited && (
+                        <div className="mt-2 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-left">
+                          <p className="text-amber-700 dark:text-amber-400 flex items-center mb-1">
+                            <svg className="w-5 h-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span className="font-medium">API Rate Limiting Detected</span>
+                          </p>
+                          <p className="text-sm text-amber-600 dark:text-amber-300">
+                            We're being rate-limited by the blockchain API. This is normal for large wallets and will resolve automatically. 
+                            The analysis will continue but may take longer than expected.
+                          </p>
+                          <div className="mt-2 flex items-center justify-between text-xs text-amber-500">
+                            <span>Retry attempts: {rateLimitInfo.retryCount}/{RATE_LIMIT.MAX_RETRIES}</span>
+                            <span>Throttle events: {rateLimitInfo.totalDelays}</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="mt-4 text-xs text-geist-accent-500 bg-geist-accent-50 dark:bg-geist-accent-700/50 p-3 rounded">
+                        <p className="mb-1"><span className="font-medium">Processing large wallets:</span> Wallets with many transactions will take longer to analyze.</p>
+                        <p><span className="font-medium">API rate limits:</span> Blockchain API rate limits may slow down processing of very active wallets.</p>
+                      </div>
+                    </div>
+                  ) : !results ? (
+                    <div className="text-center px-4 py-12 border-2 border-dashed border-geist-accent-300 dark:border-geist-accent-600 rounded-xl">
+                      <div className="w-16 h-16 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-geist-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-medium text-geist-accent-900 dark:text-geist-foreground mb-2">No Transaction Data Yet</h3>
+                      <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-6">
+                        Click "Calculate Taxes" to analyze your wallet transactions. Note that analyzing large wallets or multiple wallets may take several minutes to complete.
+                      </p>
+                      <div className="bg-geist-accent-50 dark:bg-geist-accent-700 p-4 rounded-lg inline-block">
+                        <p className="text-sm text-geist-accent-700 dark:text-geist-accent-200">
+                          <span className="font-medium">Pro tip:</span> The first time you analyze a wallet, it may take longer. Results will be cached for faster access later.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center text-geist-success dark:text-green-300 mb-2">
+                      <svg className="w-12 h-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="font-medium">Transaction data loaded successfully!</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Results Section - Only visible if results exist */}
+                {results !== null && (
+                  <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 transition-all duration-300 hover:shadow-lg animate-fade-in-delay">
+                    <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Tax Summary</h2>
+                    
+                    {/* Crypto Results */}
+                    <div className="mb-8">
+                      <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Crypto Assets</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Total Trades</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            {results?.crypto?.totalTrades || 0}
+                          </p>
+                        </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Trading Volume</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${(results?.crypto?.totalVolume || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Realized Gains</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${(results?.crypto?.realizedGains || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Est. Tax</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${(results?.crypto?.estimatedTax || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Gas Fees</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            {(results?.crypto?.gasFees || 0).toFixed(4)} SOL
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Results Section */}
-                    {results !== null && (
-                      <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 transition-all duration-300 hover:shadow-lg animate-fade-in-delay">
-                        <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Tax Summary</h2>
-                        
-                        {/* Crypto Results */}
-                        <div className="mb-8">
-                          <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Crypto Assets</h3>
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Total Trades</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                {results?.crypto?.totalTrades || 0}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Trading Volume</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${(results?.crypto?.totalVolume || 0).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Realized Gains</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${(results?.crypto?.realizedGains || 0).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Est. Tax</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${(results?.crypto?.estimatedTax || 0).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Gas Fees</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                {(results?.crypto?.gasFees || 0).toFixed(4)} SOL
-                              </p>
-                            </div>
-                          </div>
+                    {/* Traditional Results */}
+                    <div className="mb-8">
+                      <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Traditional Assets</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Total Income</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${results.traditional.totalIncome.toLocaleString()}
+                          </p>
                         </div>
-
-                        {/* Traditional Results */}
-                        <div className="mb-8">
-                          <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Traditional Assets</h3>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Total Income</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${results.traditional.totalIncome.toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Stock Gains</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${results.traditional.stockGains.toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Real Estate</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${results.traditional.realEstateGains.toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
-                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Est. Tax</p>
-                              <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
-                                ${results.traditional.estimatedTax.toLocaleString()}
-                              </p>
-                            </div>
-                          </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Stock Gains</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${results.traditional.stockGains.toLocaleString()}
+                          </p>
                         </div>
-
-                        {/* Transaction Dashboard */}
-                        <div className="mb-8 animate-fade-in-delay-2">
-                          <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Transaction History</h3>
-                          <TransactionDashboard transactions={transactions} />
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Real Estate</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${results.traditional.realEstateGains.toLocaleString()}
+                          </p>
                         </div>
+                        <div className="bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl p-4 transition-all duration-300 hover:shadow-md">
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Est. Tax</p>
+                          <p className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                            ${results.traditional.estimatedTax.toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
 
-                        {/* Tax Forms Section */}
-                        <div className="mt-8 pt-8 border-t border-geist-accent-200 dark:border-geist-accent-700 animate-fade-in-delay-3">
-                          <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Required Tax Forms</h3>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 8949</h4>
-                                  <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Sales and Other Dispositions of Capital Assets</p>
-                                </div>
-                                <button
-                                  onClick={() => generateTaxForm('8949')}
-                                  className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                                >
-                                  Download
-                                </button>
-                              </div>
-                              <p className="text-xs text-geist-accent-500">Required for reporting your crypto trades</p>
+                    {/* Transaction Dashboard */}
+                    <div className="mb-8 animate-fade-in-delay-2">
+                      <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Transaction History</h3>
+                      <TransactionDashboard transactions={transactions} />
+                    </div>
+
+                    {/* Tax Forms Section */}
+                    <div className="mt-8 pt-8 border-t border-geist-accent-200 dark:border-geist-accent-700 animate-fade-in-delay-3">
+                      <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Required Tax Forms</h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 8949</h4>
+                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Sales and Other Dispositions of Capital Assets</p>
                             </div>
-
-                            <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule D</h4>
-                                  <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Capital Gains and Losses</p>
-                                </div>
-                                <button
-                                  onClick={() => generateTaxForm('scheduleD')}
-                                  className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                                >
-                                  Download
-                                </button>
-                              </div>
-                              <p className="text-xs text-geist-accent-500">Summary of all capital gains/losses</p>
-                            </div>
-
-                            <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 1040</h4>
-                                  <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">U.S. Individual Income Tax Return</p>
-                                </div>
-                                <button
-                                  onClick={() => generateTaxForm('1040')}
-                                  className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                                >
-                                  Download
-                                </button>
-                              </div>
-                              <p className="text-xs text-geist-accent-500">Main tax return form</p>
-                            </div>
-
-                            <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                              <div className="flex justify-between items-start mb-2">
-                                <div>
-                                  <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule 1</h4>
-                                  <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Additional Income and Adjustments</p>
-                                </div>
-                                <button
-                                  onClick={() => generateTaxForm('schedule1')}
-                                  className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                                >
-                                  Download
-                                </button>
-                              </div>
-                              <p className="text-xs text-geist-accent-500">For reporting crypto mining and staking income</p>
-                            </div>
-                          </div>
-
-                          {/* Download All Button */}
-                          <div className="mt-6 pt-6 border-t border-geist-accent-200 dark:border-geist-accent-700">
                             <button
-                              onClick={generateAllForms}
-                              className="w-full flex justify-center items-center px-4 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl transition-all duration-300 hover:shadow-lg hover:-translate-y-1 font-semibold"
+                              onClick={() => generateTaxForm('8949')}
+                              className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
                             >
-                              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              Download All Forms
+                              Download
                             </button>
                           </div>
+                          <p className="text-xs text-geist-accent-500">Required for reporting your crypto trades</p>
+                        </div>
+
+                        <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule D</h4>
+                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Capital Gains and Losses</p>
+                            </div>
+                            <button
+                              onClick={() => generateTaxForm('scheduleD')}
+                              className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
+                            >
+                              Download
+                            </button>
+                          </div>
+                          <p className="text-xs text-geist-accent-500">Summary of all capital gains/losses</p>
+                        </div>
+
+                        <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 1040</h4>
+                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">U.S. Individual Income Tax Return</p>
+                            </div>
+                            <button
+                              onClick={() => generateTaxForm('1040')}
+                              className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
+                            >
+                              Download
+                            </button>
+                          </div>
+                          <p className="text-xs text-geist-accent-500">Main tax return form</p>
+                        </div>
+
+                        <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule 1</h4>
+                              <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Additional Income and Adjustments</p>
+                            </div>
+                            <button
+                              onClick={() => generateTaxForm('schedule1')}
+                              className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
+                            >
+                              Download
+                            </button>
+                          </div>
+                          <p className="text-xs text-geist-accent-500">For reporting crypto mining and staking income</p>
                         </div>
                       </div>
-                    )}
-                  </>
+
+                      {/* Download All Button */}
+                      <div className="mt-6 pt-6 border-t border-geist-accent-200 dark:border-geist-accent-700">
+                        <button
+                          onClick={generateAllForms}
+                          className="w-full flex justify-center items-center px-4 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl transition-all duration-300 hover:shadow-lg hover:-translate-y-1 font-semibold"
+                        >
+                          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                          Download All Forms
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
