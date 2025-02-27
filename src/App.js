@@ -713,6 +713,34 @@ function App() {
     return walletBalances;
   };
 
+  // Function to add a wallet to the processing queue if there's already one being processed
+  const queueWalletForProcessing = (walletAddress) => {
+    if (walletAddress.length < 32) {
+      alert('Please enter a valid Solana wallet address (minimum 32 characters)');
+      return false;
+    }
+
+    // Check if a wallet is currently being processed
+    if (walletProcessingStatus.currentWallet) {
+      // If this wallet is already in the queue or completed, no need to add it again
+      if (walletProcessingStatus.queuedWallets.includes(walletAddress) || 
+          walletProcessingStatus.completedWallets.includes(walletAddress)) {
+        return false;
+      }
+      
+      // Add the wallet to the queue
+      setWalletProcessingStatus(prev => ({
+        ...prev,
+        queuedWallets: [...prev.queuedWallets, walletAddress]
+      }));
+      return true; // Wallet was successfully queued
+    }
+    
+    // If no wallet is currently being processed, process this one immediately
+    analyzeTaxes(walletAddress);
+    return false; // Wallet was not queued, but processed immediately
+  };
+
   // Function to analyze taxes with updated wallet balance fetching
   const analyzeTaxes = async (specificWalletAddress = null) => {
     console.log('Starting tax analysis...');
@@ -749,14 +777,25 @@ function App() {
         
         // Set the selected wallet to the specified one
         setSelectedWallet(specificWalletAddress);
+        
+        // Update wallet processing status for a single wallet
+        setWalletProcessingStatus(prev => ({
+          currentWallet: specificWalletAddress,
+          queuedWallets: [],
+          // Preserve existing completed wallets instead of resetting them
+          completedWallets: prev.completedWallets || [],
+          processingAll: false
+        }));
       } else {
         // If processing all wallets, set up a processing queue
-        setWalletProcessingStatus({
-          currentWallet: validWalletAddresses.length > 0 ? validWalletAddresses[0] : null,
-          queuedWallets: validWalletAddresses.slice(1),
-          completedWallets: [],
-          processingAll: true
-        });
+        if (validWalletAddresses.length > 0) {
+          setWalletProcessingStatus({
+            currentWallet: validWalletAddresses[0],
+            queuedWallets: validWalletAddresses.slice(1),
+            completedWallets: [],
+            processingAll: true
+          });
+        }
       }
       
       if (validWalletAddresses.length > 0) {
@@ -768,20 +807,13 @@ function App() {
           
           // Update current processing wallet
           if (!specificWalletAddress) {
+            console.log(`Processing wallet ${i+1}/${validWalletAddresses.length}: ${walletAddress}`);
             setWalletProcessingStatus(prev => ({
               ...prev,
               currentWallet: walletAddress,
               queuedWallets: validWalletAddresses.slice(i + 1),
-              completedWallets: validWalletAddresses.slice(0, i)
+              completedWallets: prev.completedWallets
             }));
-          } else {
-            // For single wallet processing
-            setWalletProcessingStatus({
-              currentWallet: walletAddress,
-              queuedWallets: [],
-              completedWallets: [],
-              processingAll: false
-            });
           }
           
           try {
@@ -830,6 +862,35 @@ function App() {
                 ...prev,
                 completedWallets: [...prev.completedWallets, walletAddress]
               }));
+            } else {
+              // For single wallet processing, mark it as completed when done
+              setWalletProcessingStatus(prev => {
+                const updatedStatus = {
+                  ...prev,
+                  currentWallet: null,
+                  // Add the wallet to completed wallets if not already there
+                  completedWallets: prev.completedWallets.includes(specificWalletAddress) 
+                    ? prev.completedWallets 
+                    : [...prev.completedWallets, specificWalletAddress]
+                };
+                
+                // Process the next wallet in the queue if there are any
+                if (prev.queuedWallets.length > 0) {
+                  const nextWallet = prev.queuedWallets[0];
+                  const remainingQueue = prev.queuedWallets.slice(1);
+                  
+                  // Start processing the next wallet in the queue
+                  setTimeout(() => {
+                    analyzeTaxes(nextWallet);
+                  }, 500); // Small delay before starting the next wallet
+                  
+                  // Update the queue
+                  updatedStatus.currentWallet = nextWallet;
+                  updatedStatus.queuedWallets = remainingQueue;
+                }
+                
+                return updatedStatus;
+              });
             }
             
             // Set transactions after each wallet is processed so user can see
@@ -845,6 +906,43 @@ function App() {
             }
           } catch (error) {
             console.error(`Error processing wallet ${walletAddress}: ${error.message}`);
+            
+            // Even if there's an error, mark this wallet as completed to move on
+            if (!specificWalletAddress) {
+              setWalletProcessingStatus(prev => ({
+                ...prev,
+                completedWallets: [...prev.completedWallets, walletAddress]
+              }));
+            } else if (specificWalletAddress === walletAddress) {
+              // For single wallet processing with error, still mark it as completed
+              setWalletProcessingStatus(prev => {
+                const updatedStatus = {
+                  ...prev,
+                  currentWallet: null,
+                  completedWallets: prev.completedWallets.includes(specificWalletAddress)
+                    ? prev.completedWallets
+                    : [...prev.completedWallets, specificWalletAddress]
+                };
+                
+                // Process the next wallet in the queue if there are any
+                if (prev.queuedWallets.length > 0) {
+                  const nextWallet = prev.queuedWallets[0];
+                  const remainingQueue = prev.queuedWallets.slice(1);
+                  
+                  // Start processing the next wallet in the queue
+                  setTimeout(() => {
+                    analyzeTaxes(nextWallet);
+                  }, 500); // Small delay before starting the next wallet
+                  
+                  // Update the queue
+                  updatedStatus.currentWallet = nextWallet;
+                  updatedStatus.queuedWallets = remainingQueue;
+                }
+                
+                return updatedStatus;
+              });
+            }
+            
             // Continue with next wallet
           }
         }
@@ -912,6 +1010,14 @@ function App() {
       }
     } catch (error) {
       console.error('Error in analyzeTaxes:', error);
+      
+      // Reset wallet processing status on error
+      setWalletProcessingStatus({
+        currentWallet: null,
+        queuedWallets: [],
+        completedWallets: [],
+        processingAll: false
+      });
     } finally {
       setLoadingTransactions(false);
       setLoadingProgress(100);
@@ -1061,6 +1167,7 @@ function App() {
           setFormData={setFormData}
           goBackToDashboard={goToDashboard}
           walletProcessingStatus={walletProcessingStatus}
+          queueWalletForProcessing={queueWalletForProcessing}
         />
       ) : (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1663,7 +1770,7 @@ function App() {
                                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                             </svg>
                                           ) : (
-                                            <span className="text-xs text-geist-accent-500 inline-block mr-2">Pending</span>
+                                            <span className="text-xs text-geist-accent-500 inline-block mr-2">In-Queue</span>
                                           )}
                                           {isProcessing ? 'Loading...' : '—'}
                                         </div>
@@ -1678,7 +1785,7 @@ function App() {
                                         className={`px-3 py-1 bg-geist-success text-white rounded-lg hover:bg-opacity-90 text-xs font-medium ${(isQueued && !isCompleted && loadingTransactions) ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         disabled={isQueued && !isCompleted && loadingTransactions}
                                       >
-                                        {(isQueued && !isCompleted && loadingTransactions) ? 'Pending' : 'View'}
+                                        {(isQueued && !isCompleted && loadingTransactions) ? 'In-Queue' : 'View'}
                                       </button>
                                     </td>
                                   </tr>
@@ -1746,22 +1853,6 @@ function App() {
                         walletNames={formData.walletNames.filter((_, index) => formData.walletAddresses[index].length >= 32)}
                         onWalletSelect={setSelectedWallet}
                       />
-                    )}
-
-                    {loadingTransactions && selectedWallet !== 'all' && 
-                      walletProcessingStatus.currentWallet !== selectedWallet && 
-                      !walletProcessingStatus.queuedWallets.includes(selectedWallet) &&
-                      !walletProcessingStatus.completedWallets.includes(selectedWallet) && (
-                      <div className="flex items-center justify-center py-16">
-                        <div className="text-center">
-                          <svg className="animate-spin h-10 w-10 mx-auto mb-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">Loading transactions...</p>
-                          <p className="text-sm text-geist-accent-500 mt-2">Transaction data will appear here once loading is complete.</p>
-                        </div>
-                      </div>
                     )}
 
                     {loadingTransactions && selectedWallet !== 'all' && 

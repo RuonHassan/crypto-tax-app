@@ -12,7 +12,8 @@ const UserInformationPage = ({
   clearAllTransactionCache,
   setFormData,
   goBackToDashboard,
-  walletProcessingStatus
+  walletProcessingStatus,
+  queueWalletForProcessing
 }) => {
   const [walletSaving, setWalletSaving] = useState(false);
   const [incomeSaving, setIncomeSaving] = useState(false);
@@ -58,9 +59,15 @@ const UserInformationPage = ({
     const walletAddress = formData.walletAddresses[index];
     
     if (walletAddress.length >= 32) {
-      // Wallet address is valid, analyze just this wallet
       try {
-        await analyzeTaxes(walletAddress); // Pass the specific wallet to analyze
+        // Check if we need to queue this wallet
+        if (walletProcessingStatus && walletProcessingStatus.currentWallet) {
+          // A wallet is currently being processed, queue this one
+          queueWalletForProcessing(walletAddress);
+        } else {
+          // No wallet is being processed, process this one immediately
+          await analyzeTaxes(walletAddress);
+        }
       } catch (error) {
         console.error('Error analyzing wallet:', error);
       }
@@ -235,7 +242,7 @@ const UserInformationPage = ({
                       </svg>
                       Pulling Transactions...
                     </>
-                  ) : walletProcessingStatus && walletProcessingStatus.currentWallet === address ? (
+                  ) : (walletProcessingStatus && walletProcessingStatus.currentWallet === address) ? (
                     <>
                       <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -243,14 +250,14 @@ const UserInformationPage = ({
                       </svg>
                       Loading...
                     </>
-                  ) : walletProcessingStatus && walletProcessingStatus.queuedWallets.includes(address) ? (
+                  ) : (walletProcessingStatus && walletProcessingStatus.queuedWallets.includes(address)) ? (
                     <>
                       <svg className="w-4 h-4 mr-1 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                       In Queue
                     </>
-                  ) : walletProcessingStatus && walletProcessingStatus.completedWallets.includes(address) ? (
+                  ) : (walletProcessingStatus && walletProcessingStatus.completedWallets.includes(address)) ? (
                     <>
                       <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
