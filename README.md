@@ -1,70 +1,98 @@
-# Getting Started with Create React App
+# TaxAI - Cryptocurrency Tax Calculator
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+![TaxAI Logo](./public/logo192.png)
 
-## Available Scripts
+A modern, user-friendly application that simplifies crypto tax calculations, analysis, and reporting.
 
-In the project directory, you can run:
+## 🚀 Features
 
-### `npm start`
+- **Multi-wallet Support**: Connect and analyze multiple Solana wallets simultaneously
+- **Transaction Analysis**: Automatically categorize and process cryptocurrency transactions
+- **Tax Calculation**: Calculate capital gains/losses according to tax regulations
+- **Real-time Portfolio Tracking**: View your crypto portfolio with up-to-date balances
+- **Tax Form Generation**: Generate ready-to-file tax forms (8949, Schedule D, 1040, Schedule 1)
+- **Queue System**: Process multiple wallets with a clear indication of which wallet is currently being analyzed
+- **Wallet Balance Tracking**: See current on-chain balances for all connected wallets
+- **Dark Mode Support**: Enjoy a beautiful UI in both light and dark modes
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## 🛠️ Technology Stack
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- React 19
+- Tailwind CSS
+- Geist UI components
+- Solana Web3.js for blockchain interaction
+- Recharts for data visualization
 
-### `npm test`
+## 🔧 Installation
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/crypto-tax-app.git
+   cd crypto-tax-app
+   ```
 
-### `npm run build`
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+3. Start the development server:
+   ```bash
+   npm start
+   ```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+4. The application will open in your browser at `http://localhost:3000`
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## 📋 Usage Guide
 
-### `npm run eject`
+### Add Your Wallets
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+1. Navigate to the "Your Information" page
+2. Enter a name for your wallet
+3. Input your Solana wallet address
+4. Click "Connect" to fetch your wallet's transaction history
+5. Add additional wallets if needed with the "Add Another Wallet" button
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### Process Transactions
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+- When a wallet is connected, its transactions will be analyzed automatically
+- If multiple wallets are connected, they will be processed in sequence
+- You can view the queue status in the dashboard
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### View Your Tax Dashboard
 
-## Learn More
+- The dashboard displays:
+  - Current portfolio value and breakdown
+  - Transaction history and details
+  - Tax summary with estimated obligations
+  - Available tax forms for download
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+### Generate Tax Forms
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+1. Navigate to the Tax Forms section in the dashboard
+2. Select the form you need (8949, Schedule D, 1040, Schedule 1)
+3. Click "Download" to save the form to your computer
 
-### Code Splitting
+## 🔄 Transaction Processing Flow
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+1. Fetching wallet balances directly from the blockchain
+2. Analyzing transaction history
+3. Categorizing transactions (trades, transfers, gas fees)
+4. Calculating capital gains/losses
+5. Generating tax summaries
 
-### Analyzing the Bundle Size
+## 🤝 Contributing
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-### Making a Progressive Web App
+## 📝 License
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-### Advanced Configuration
+## 📞 Support
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+If you encounter any issues or have questions, please open an issue on the repository.
 
-### Deployment
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Made with ❤️ by Your Team Name
