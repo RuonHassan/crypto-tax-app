@@ -1,0 +1,84 @@
+/* Animations for the landing page and app transitions */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Animation classes with delays */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-fade-in-delay {
+  opacity: 0;
+  animation: fadeIn 0.5s ease-out 0.2s forwards;
+}
+
+.animate-fade-in-delay-2 {
+  opacity: 0;
+  animation: fadeIn 0.5s ease-out 0.4s forwards;
+}
+
+.animate-fade-in-delay-3 {
+  opacity: 0;
+  animation: fadeIn 0.5s ease-out 0.6s forwards;
+}
+
+/* Blur effects for decorative elements */
+.blur-3xl {
+  filter: blur(64px);
+}
+
+/* Gradient text support for browsers that might not support it natively */
+.bg-clip-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .blur-3xl {
+    filter: blur(48px);
+  }
+}
+
+/* Hover transitions for cards */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.duration-300 {
+  transition-duration: 300ms;
+}
+
+/* Transform utilities for the animated elements */
+.transform {
+  transform: translateZ(0);
+}
+
+.-rotate-3 {
+  transform: rotate(-3deg);
+}
+
+.hover\:-translate-y-1:hover {
+  transform: translateY(-4px);
+}
+
+.hover\:-translate-y-2:hover {
+  transform: translateY(-8px);
+}
+
+/* Scale animations */
+.hover\:scale-105:hover {
+  transform: scale(1.05);
+}
+
+.group:hover .group-hover\:scale-110 {
+  transform: scale(1.1);
+} 

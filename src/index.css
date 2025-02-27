@@ -1,0 +1,49 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-geist-accent-100 dark:bg-geist-background text-geist-accent-900 dark:text-geist-foreground;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  }
+  
+  .btn-primary {
+    @apply bg-geist-accent-900 dark:bg-geist-accent-100 text-white dark:text-geist-accent-900 hover:bg-opacity-90 dark:hover:bg-opacity-90;
+  }
+  
+  .btn-secondary {
+    @apply bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 
+    hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600;
+  }
+  
+  .input {
+    @apply w-full px-4 py-2 rounded-lg border border-geist-accent-200 dark:border-geist-accent-700 
+    bg-white dark:bg-geist-accent-800 text-geist-accent-900 dark:text-geist-foreground
+    focus:ring-2 focus:ring-geist-accent-500 focus:border-transparent outline-none transition-all;
+  }
+  
+  .card {
+    @apply bg-white dark:bg-geist-accent-800 border border-geist-accent-200 dark:border-geist-accent-700 
+    rounded-xl shadow-sm hover:shadow-md transition-all duration-200;
+  }
+}
