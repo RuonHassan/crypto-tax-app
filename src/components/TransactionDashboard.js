@@ -2,7 +2,14 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TRANSACTION_TYPES, categorizeTransaction, DEX_PROGRAMS } from '../utils/transactionUtils';
 
-const TransactionDashboard = ({ transactions = [] }) => {
+const TransactionDashboard = ({ 
+  transactions = [], 
+  selectedWallet = 'all', 
+  walletMap = {},
+  walletAddresses = [],
+  walletNames = [],
+  onWalletSelect
+}) => {
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
   const [searchQuery, setSearchQuery] = useState('');
@@ -11,18 +18,55 @@ const TransactionDashboard = ({ transactions = [] }) => {
 
   console.log('TransactionDashboard rendered with transactions:', transactions);
 
-  if (!transactions || transactions.length === 0) {
+  // Filter transactions by selected wallet
+  const walletFilteredTransactions = selectedWallet === 'all' 
+    ? transactions 
+    : transactions.filter(tx => tx.sourceWallet === selectedWallet || tx.destinationWallet === selectedWallet);
+
+  if (!walletFilteredTransactions || walletFilteredTransactions.length === 0) {
     return (
-      <div className="bg-geist-accent-50 dark:bg-geist-accent-800 rounded-xl p-6 shadow-sm text-center">
-        <h3 className="text-lg font-semibold mb-4">No Transactions Available</h3>
-        <p className="text-geist-accent-500">
-          No transaction data is currently available. This could be because:
-        </p>
-        <ul className="mt-2 text-geist-accent-500 list-disc list-inside">
-          <li>No wallet addresses have been analyzed yet</li>
-          <li>The selected wallet has no transactions</li>
-          <li>The data is still loading</li>
-        </ul>
+      <div>
+        {/* Wallet Tabs */}
+        <div className="mb-6">
+          <div className="flex flex-wrap border-b border-geist-accent-200 dark:border-geist-accent-700">
+            <button
+              onClick={() => onWalletSelect('all')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-200 ${
+                selectedWallet === 'all'
+                  ? 'border-geist-success text-geist-success'
+                  : 'border-transparent text-geist-accent-600 hover:text-geist-accent-900'
+              }`}
+            >
+              All Wallets
+            </button>
+            
+            {walletAddresses.map((address, index) => (
+              <button
+                key={address}
+                onClick={() => onWalletSelect(address)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-200 ${
+                  selectedWallet === address
+                    ? 'border-geist-success text-geist-success'
+                    : 'border-transparent text-geist-accent-600 hover:text-geist-accent-900'
+                }`}
+              >
+                {walletNames[index] || `Wallet ${index + 1}`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-geist-accent-50 dark:bg-geist-accent-800 rounded-xl p-6 shadow-sm text-center">
+          <h3 className="text-lg font-semibold mb-4">No Transactions Available</h3>
+          <p className="text-geist-accent-500">
+            No transaction data is currently available. This could be because:
+          </p>
+          <ul className="mt-2 text-geist-accent-500 list-disc list-inside">
+            <li>No wallet addresses have been analyzed yet</li>
+            <li>The selected wallet has no transactions</li>
+            <li>The data is still loading</li>
+          </ul>
+        </div>
       </div>
     );
   }
@@ -30,10 +74,14 @@ const TransactionDashboard = ({ transactions = [] }) => {
   // Filter transactions
   const filterTransactions = (txs) => {
     return txs.filter(tx => {
+      if (!tx) return false;
+      
       const matchesSearch = searchQuery === '' || 
-        tx.signature?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (tx.signature && tx.signature.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (tx.sourceWallet && tx.sourceWallet.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (tx.destinationWallet && tx.destinationWallet.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (tx.sourceWalletName && tx.sourceWalletName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (tx.destinationWalletName && tx.destinationWalletName.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (tx.tokenInfo?.symbol && tx.tokenInfo.symbol.toLowerCase().includes(searchQuery.toLowerCase()));
 
       switch (selectedFilter) {
@@ -44,9 +92,9 @@ const TransactionDashboard = ({ transactions = [] }) => {
         case 'swaps':
           return tx.type === TRANSACTION_TYPES.SWAP && matchesSearch;
         case 'internal':
-          return tx.type === TRANSACTION_TYPES.INTERNAL_TRANSFER && matchesSearch;
+          return tx.isInternalTransfer && matchesSearch;
         case 'fees':
-          return (tx.type === TRANSACTION_TYPES.GAS || tx.solChange < 0) && matchesSearch;
+          return ((tx.type === TRANSACTION_TYPES.GAS || (tx.solChange || 0) < 0)) && matchesSearch;
         default:
           return matchesSearch;
       }
@@ -56,12 +104,20 @@ const TransactionDashboard = ({ transactions = [] }) => {
   // Sort transactions
   const sortTransactions = (txs) => {
     return [...txs].sort((a, b) => {
+      // Handle potential null values
+      if (!a || !b) return 0;
+      
       let aValue = a[sortConfig.key];
       let bValue = b[sortConfig.key];
       
+      // Handle undefined values - put them at the end
+      if (aValue === undefined && bValue === undefined) return 0;
+      if (aValue === undefined) return 1;
+      if (bValue === undefined) return -1;
+      
       if (sortConfig.key === 'valueUSD' || sortConfig.key === 'solChange') {
-        aValue = Math.abs(aValue);
-        bValue = Math.abs(bValue);
+        aValue = Math.abs(aValue || 0);
+        bValue = Math.abs(bValue || 0);
       }
       
       if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -77,8 +133,8 @@ const TransactionDashboard = ({ transactions = [] }) => {
     }));
   };
 
-  // Process transactions for display
-  const allProcessedTransactions = sortTransactions(filterTransactions(transactions));
+  // Apply all filters to walletFilteredTransactions
+  const allProcessedTransactions = sortTransactions(filterTransactions(walletFilteredTransactions));
   
   // Apply pagination
   const totalPages = Math.ceil(allProcessedTransactions.length / pageSize);
@@ -86,12 +142,12 @@ const TransactionDashboard = ({ transactions = [] }) => {
   const endIndex = Math.min(startIndex + pageSize, allProcessedTransactions.length);
   const paginatedTransactions = allProcessedTransactions.slice(startIndex, endIndex);
 
-  // Calculate statistics
-  const stats = transactions.reduce((acc, tx) => {
+  // Calculate statistics - use walletFilteredTransactions
+  const stats = walletFilteredTransactions.reduce((acc, tx) => {
     if (tx.type === TRANSACTION_TYPES.GAS) {
-      acc.totalGasFees += Math.abs(tx.solChange);
+      acc.totalGasFees += Math.abs(tx.solChange || 0);
     } else if (tx.type === TRANSACTION_TYPES.SWAP) {
-      acc.totalTradingFees += Math.abs(tx.solChange);
+      acc.totalTradingFees += Math.abs(tx.solChange || 0);
       acc.totalSwaps++;
     } else if (tx.type === TRANSACTION_TYPES.TOKEN_TRANSACTION) {
       acc.totalTokenTransactions++;
@@ -100,11 +156,11 @@ const TransactionDashboard = ({ transactions = [] }) => {
       } else if (tx.tokenAction === "Sell") {
         acc.tokenSells++;
       }
-    } else if (tx.type === TRANSACTION_TYPES.INTERNAL_TRANSFER) {
+    } else if (tx.isInternalTransfer) {
       acc.totalInternalTransfers++;
     } else if (tx.type === TRANSACTION_TYPES.TRANSFER) {
-      if (tx.solChange > 0) acc.totalReceived += tx.solChange;
-      else acc.totalSent += Math.abs(tx.solChange);
+      if ((tx.solChange || 0) > 0) acc.totalReceived += (tx.solChange || 0);
+      else acc.totalSent += Math.abs(tx.solChange || 0);
     }
     return acc;
   }, {
@@ -119,20 +175,24 @@ const TransactionDashboard = ({ transactions = [] }) => {
     totalSent: 0
   });
 
-  // Prepare chart data
-  const chartData = transactions
+  // Prepare chart data - use walletFilteredTransactions
+  const chartData = walletFilteredTransactions
     .filter(tx => tx.type !== TRANSACTION_TYPES.GAS)
     .map(tx => ({
-      date: new Date(tx.timestamp * 1000).toLocaleDateString(),
-      balance: Number(tx.runningBalance?.toFixed(4) || 0),
+      date: new Date((tx.timestamp || 0) * 1000).toLocaleDateString(),
+      balance: Number((tx.runningBalance || 0).toFixed(4)),
       volume: Math.abs(tx.solChange || 0)
     }));
 
   const renderTransactionRow = (tx) => {
     const getTransactionColor = () => {
+      if (!tx || tx.type === undefined) return 'text-geist-accent-500';
+      
+      if (tx.isInternalTransfer) {
+        return 'text-blue-500 dark:text-blue-400';
+      }
+      
       switch (tx.type) {
-        case TRANSACTION_TYPES.INTERNAL_TRANSFER:
-          return 'text-blue-500 dark:text-blue-400';
         case TRANSACTION_TYPES.SWAP:
           return 'text-purple-500 dark:text-purple-400';
         case TRANSACTION_TYPES.TOKEN_TRANSACTION:
@@ -142,14 +202,15 @@ const TransactionDashboard = ({ transactions = [] }) => {
         case TRANSACTION_TYPES.GAS:
           return 'text-orange-500 dark:text-orange-400';
         default:
-          return tx.solChange > 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+          return (tx.solChange || 0) > 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400';
       }
     };
 
     const getTransactionDetails = () => {
+      if (!tx) return '';
       if (tx.type === TRANSACTION_TYPES.GAS) return 'Network Fee';
       if (tx.type === TRANSACTION_TYPES.SWAP || tx.type === TRANSACTION_TYPES.TOKEN_TRANSACTION) {
-        const dex = tx.dex || DEX_PROGRAMS[tx.programId] || 'Unknown DEX';
+        const dex = tx.dex || (tx.programId && DEX_PROGRAMS[tx.programId]) || 'Unknown DEX';
         const tokenInfo = tx.tokenInfo?.symbol ? ` - ${tx.tokenInfo.symbol}` : '';
         return `${dex}${tokenInfo}`;
       }
@@ -161,7 +222,7 @@ const TransactionDashboard = ({ transactions = [] }) => {
         <td className="py-4 px-6">
           <div className="flex flex-col">
             <span className={`font-medium ${getTransactionColor()}`}>
-              {categorizeTransaction(tx)}
+              {tx ? categorizeTransaction(tx) : 'Unknown Transaction'}
             </span>
             <span className="text-sm text-geist-accent-500">
               {getTransactionDetails()}
@@ -169,34 +230,40 @@ const TransactionDashboard = ({ transactions = [] }) => {
           </div>
         </td>
         <td className="py-4 px-6">
-          {new Date(tx.timestamp * 1000).toLocaleString()}
+          {tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'Unknown date'}
         </td>
         <td className="py-4 px-6">
           <span className={getTransactionColor()}>
-            {tx.solChange > 0 ? '+' : ''}{tx.solChange.toFixed(4)} SOL
+            {tx.solChange > 0 ? '+' : ''}{(tx.solChange || 0).toFixed(4)} SOL
           </span>
         </td>
         <td className="py-4 px-6">
           ${Math.abs(tx.valueUSD || 0).toFixed(2)}
         </td>
         <td className="py-4 px-6">
-          {tx.runningBalance?.toFixed(4)} SOL
+          {(tx.runningBalance || 0).toFixed(4)} SOL
         </td>
         <td className="py-4 px-6">
           <div className="flex flex-col space-y-1">
-            {tx.type === TRANSACTION_TYPES.INTERNAL_TRANSFER ? (
+            {tx.isInternalTransfer ? (
               <>
-                <span className="text-sm text-geist-accent-500">From: {tx.sourceWallet.slice(0, 4)}...{tx.sourceWallet.slice(-4)}</span>
-                <span className="text-sm text-geist-accent-500">To: {tx.destinationWallet.slice(0, 4)}...{tx.destinationWallet.slice(-4)}</span>
+                <span className="text-sm text-geist-accent-700 dark:text-geist-accent-300">
+                  From: <span className="font-medium">{tx.sourceWalletName || 'Unknown'}</span>
+                  <span className="text-xs text-geist-accent-500"> ({tx.sourceWallet ? `${tx.sourceWallet.slice(0, 4)}...${tx.sourceWallet.slice(-4)}` : 'Unknown'})</span>
+                </span>
+                <span className="text-sm text-geist-accent-700 dark:text-geist-accent-300">
+                  To: <span className="font-medium">{tx.destinationWalletName || 'Unknown'}</span>
+                  <span className="text-xs text-geist-accent-500"> ({tx.destinationWallet ? `${tx.destinationWallet.slice(0, 4)}...${tx.destinationWallet.slice(-4)}` : 'Unknown'})</span>
+                </span>
               </>
             ) : (
               <a
-                href={`https://solscan.io/tx/${tx.signature}`}
+                href={`https://solscan.io/tx/${tx.signature || ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-geist-accent-500 hover:underline"
               >
-                {tx.signature.slice(0, 8)}...{tx.signature.slice(-8)}
+                {tx.signature ? `${tx.signature.slice(0, 8)}...${tx.signature.slice(-8)}` : 'Unknown'}
               </a>
             )}
           </div>
@@ -217,7 +284,54 @@ const TransactionDashboard = ({ transactions = [] }) => {
   };
 
   return (
-    <div className="mt-8 space-y-8">
+    <div className="mt-4 space-y-8">
+      {/* Wallet Tabs */}
+      <div className="mb-2">
+        <div className="flex flex-wrap border-b border-geist-accent-200 dark:border-geist-accent-700">
+          <button
+            onClick={() => onWalletSelect('all')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-200 ${
+              selectedWallet === 'all'
+                ? 'border-geist-success text-geist-success'
+                : 'border-transparent text-geist-accent-600 hover:text-geist-accent-900'
+            }`}
+          >
+            All Wallets
+          </button>
+          
+          {walletAddresses.map((address, index) => (
+            <button
+              key={address}
+              onClick={() => onWalletSelect(address)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-200 ${
+                selectedWallet === address
+                  ? 'border-geist-success text-geist-success'
+                  : 'border-transparent text-geist-accent-600 hover:text-geist-accent-900'
+              }`}
+            >
+              {walletNames[index] || `Wallet ${index + 1}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Selected Wallet Stats - Only shown when a specific wallet is selected */}
+      {selectedWallet !== 'all' && (
+        <div className="bg-geist-accent-50 dark:bg-geist-accent-800 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-geist-accent-900 dark:text-geist-foreground">
+                {walletMap[selectedWallet] || 'Selected Wallet'}
+              </h3>
+              <p className="text-sm text-geist-accent-600 break-all">{selectedWallet}</p>
+            </div>
+            <div className="bg-geist-success bg-opacity-10 text-geist-success px-3 py-1 rounded-full text-sm font-medium">
+              Active
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-geist-accent-50 dark:bg-geist-accent-800 rounded-xl p-6 shadow-sm">
@@ -247,15 +361,15 @@ const TransactionDashboard = ({ transactions = [] }) => {
           <div className="space-y-2">
             <div className="flex justify-between">
               <span>Total Received:</span>
-              <span className="font-medium text-green-500">{stats.totalReceived.toFixed(4)} SOL</span>
+              <span className="font-medium text-green-500">{(stats.totalReceived || 0).toFixed(4)} SOL</span>
             </div>
             <div className="flex justify-between">
               <span>Total Sent:</span>
-              <span className="font-medium text-red-500">{stats.totalSent.toFixed(4)} SOL</span>
+              <span className="font-medium text-red-500">{(stats.totalSent || 0).toFixed(4)} SOL</span>
             </div>
             <div className="flex justify-between">
               <span>Total Fees:</span>
-              <span className="font-medium text-orange-500">{(stats.totalGasFees + stats.totalTradingFees).toFixed(4)} SOL</span>
+              <span className="font-medium text-orange-500">{((stats.totalGasFees || 0) + (stats.totalTradingFees || 0)).toFixed(4)} SOL</span>
             </div>
           </div>
         </div>
@@ -365,6 +479,9 @@ const TransactionDashboard = ({ transactions = [] }) => {
       <div className="flex justify-between items-center mb-4">
         <div className="text-geist-accent-600 dark:text-geist-accent-300">
           Showing {startIndex + 1}-{endIndex} of {allProcessedTransactions.length} transactions
+          {selectedWallet !== 'all' && (
+            <span> for {walletMap[selectedWallet] || 'selected wallet'}</span>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           <label className="text-geist-accent-600 dark:text-geist-accent-300">
@@ -455,7 +572,7 @@ const TransactionDashboard = ({ transactions = [] }) => {
           
           <div className="flex items-center px-4">
             <span className="text-geist-accent-600 dark:text-geist-accent-300">
-              Page {currentPage} of {totalPages}
+              Page {currentPage} of {Math.max(1, totalPages)}
             </span>
           </div>
           
