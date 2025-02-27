@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 // Add CSS import for animations if not already included in your app
 import './styles/animations.css';
 
@@ -21,6 +21,12 @@ import calculateTaxes from './calculateTaxes';
 import priceService from './services/priceService';
 
 import TransactionDashboard from './components/TransactionDashboard.js';
+
+// Import services
+import WalletProcessingService from './services/wallet/walletProcessingService';
+import TransactionService from './services/wallet/transactionService';
+import CacheService from './services/cache/cacheService';
+import TaxCalculationService from './services/tax/taxCalculationService';
 
 const CACHE_KEY_PREFIX = 'solana_tx_';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -122,8 +128,8 @@ function App() {
   const [results, setResults] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loadingProgress, setLoadingProgress] = useState(0);
-const [showLandingPage, setShowLandingPage] = useState(true);
-const [bypassCache, setBypassCache] = useState(false);
+  const [showLandingPage, setShowLandingPage] = useState(true);
+  const [bypassCache, setBypassCache] = useState(false);
   // Add state for rate limiting info
   const [rateLimitInfo, setRateLimitInfo] = useState({
     isLimited: false,
@@ -143,7 +149,7 @@ const [bypassCache, setBypassCache] = useState(false);
 
   // Add a state to track if the user info page is shown
   const [showUserInfoPage, setShowUserInfoPage] = useState(false);
-
+  
   // Add a state to track if the app has loaded
   const [appLoaded, setAppLoaded] = useState(false);
   
@@ -161,6 +167,21 @@ const [bypassCache, setBypassCache] = useState(false);
     completedWallets: [],
     processingAll: false
   });
+  
+  // Initialize services
+  const services = useMemo(() => {
+    const cacheService = new CacheService();
+    const transactionService = new TransactionService(RATE_LIMIT);
+    const walletProcessingService = new WalletProcessingService(cacheService, transactionService);
+    const taxCalculationService = new TaxCalculationService();
+    
+    return {
+      cache: cacheService,
+      transaction: transactionService,
+      walletProcessing: walletProcessingService,
+      taxCalculation: taxCalculationService
+    };
+  }, []);
   
   // Set app as loaded after a small delay
   useEffect(() => {
@@ -251,73 +272,52 @@ const [bypassCache, setBypassCache] = useState(false);
   
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const clearAllTransactionCache = () => {
-    console.log('Clearing all transaction cache...');
-    // First, find all localStorage keys that start with our cache prefix
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(CACHE_KEY_PREFIX)) {
-        keysToRemove.push(key);
-      }
-    }
-    
-    // Then remove them
-    keysToRemove.forEach(key => {
-      localStorage.removeItem(key);
-    });
-    
-    console.log(`Cleared ${keysToRemove.length} cached items`);
-    setTransactions([]);
-    setResults(null);
-    setLoadingProgress(0);
-  };
-
+  // Updated clear transaction cache function to use the services
   const clearTransactionCache = () => {
-    // Only clear cache for valid wallet addresses
-    const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
-    
-    if (validWalletAddresses.length === 0) {
-      alert('Please add valid wallet addresses first.');
-      return;
+    if (selectedWallet === 'all') {
+      return clearAllTransactionCache();
     }
     
-    // Clear cache for these wallet addresses
-    validWalletAddresses.forEach(address => {
-      const cacheKey = `${address}_${getFiscalYearDates().startDate.getTime()}`;
-      localStorage.removeItem(CACHE_KEY_PREFIX + cacheKey);
-    });
+    // Clear cache for the selected wallet
+    services.cache.clearTransactionCache(selectedWallet);
     
-    // Set bypassCache to true for the next analyze
+    // Force re-analysis
     setBypassCache(true);
+    if (services && services.cache) {
+      services.cache.setBypassCache(true);
+    }
     
-    // Reset transactions and results
-    setTransactions([]);
-    setResults(null);
-    setLoadingProgress(0);
+    if (window.confirm('Cache cleared. Would you like to re-analyze the wallet now?')) {
+      analyzeTaxes(selectedWallet);
+    }
+  };
+  
+  const clearAllTransactionCache = () => {
+    const count = services.cache.clearAllTransactionCache();
     
-    alert('Cache cleared. Click "Calculate All Taxes" to refresh the data.');
+    // Force re-analysis
+    setBypassCache(true);
+    if (services && services.cache) {
+      services.cache.setBypassCache(true);
+    }
+    
+    if (window.confirm(`Cleared ${count} cache entries. Would you like to re-analyze all wallets now?`)) {
+      analyzeTaxes();
+    }
   };
 
   const getFromCache = (key) => {
-    if (bypassCache) return null;
-    
-    const cached = localStorage.getItem(CACHE_KEY_PREFIX + key);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_DURATION) {
-        return data;
-      }
-      localStorage.removeItem(CACHE_KEY_PREFIX + key);
+    if (!services || !services.cache) {
+      return null;
     }
-    return null;
+    return services.cache.getFromCache(key);
   };
 
   const saveToCache = (key, data) => {
-    localStorage.setItem(CACHE_KEY_PREFIX + key, JSON.stringify({
-      data,
-      timestamp: Date.now()
-    }));
+    if (!services || !services.cache) {
+      return false;
+    }
+    return services.cache.saveToCache(key, data);
   };
 
   const fetchWithRetry = async (fn, maxRetries = RATE_LIMIT.MAX_RETRIES, initialDelay = RATE_LIMIT.INITIAL_BACKOFF) => {
@@ -347,326 +347,40 @@ const [bypassCache, setBypassCache] = useState(false);
     }
   };
 
+  // Use the state variable to also update the service
+  useEffect(() => {
+    if (services && services.cache) {
+      services.cache.setBypassCache(bypassCache);
+    }
+  }, [bypassCache, services]);
+
+  // Updated fetch transactions function to use the transactions service properly
   const fetchSolanaTransactions = async (walletAddress) => {
-    console.log('Starting transaction fetch for wallet:', walletAddress);
-    
-    if (!walletAddress || walletAddress.length < 32) {
-      throw new Error('Invalid wallet address format');
-    }
-
-    // Check cache first
-    const cacheKey = `${walletAddress}_${getFiscalYearDates().startDate.getTime()}`;
-    const cachedData = getFromCache(cacheKey);
-    if (cachedData) {
-      console.log('Found cached transactions');
-      return cachedData;
-    }
-
     try {
-      const connection = new Connection(SOLANA_RPC_ENDPOINT, {
-        commitment: 'confirmed',
-        confirmTransactionInitialTimeout: 60000,
-        httpHeaders: {
-          'Cache-Control': 'max-age=3600',
-          'Retry-After': '5'
-        }
-      });
+      // Get fiscal year dates for the cache key
+      const { startDate } = getFiscalYearDates();
+      const cacheKey = `${walletAddress}_${startDate.getTime()}`;
       
-      const publicKey = new PublicKey(walletAddress);
-      const { startDate, endDate } = getFiscalYearDates();
-      const startTime = startDate.getTime() / 1000;
-      const endTime = endDate.getTime() / 1000;
-
-      // Further optimized batch settings
-      const BATCH_SIZE = 75;           // Increased from 50 to 75
-      const PARALLEL_BATCHES = 3;      // Increased from 2 to 3
-      const SIGNATURE_BATCH_SIZE = 100; // Separate larger batch size for signatures
-      
-      let allTransactions = [];
-      let before = undefined;
-      let hasMore = true;
-      let totalSignatures = [];
-
-      // First phase: Get all signatures with smart rate limiting
-      console.log('Phase 1: Fetching transaction signatures...');
-      let signatureBatchCounter = 0;
-      
-      while (hasMore) {
-        try {
-          signatureBatchCounter++;
-          const signatures = await fetchWithRetry(async () => {
-            return await connection.getSignaturesForAddress(
-              publicKey,
-              { before, limit: SIGNATURE_BATCH_SIZE }
-            );
-          });
-
-          if (!signatures || signatures.length === 0) {
-            hasMore = false;
-            continue;
-          }
-
-          // Filter signatures by date range - do this immediately to reduce memory usage
-          const validSignatures = signatures.filter(sig => 
-            sig.blockTime && sig.blockTime >= startTime && sig.blockTime <= endTime
-          );
-
-          if (validSignatures.length === 0) {
-            if (signatures[signatures.length - 1].blockTime < startTime) {
-              hasMore = false;
-              continue;
-            }
-          }
-
-          totalSignatures.push(...validSignatures);
-          before = signatures[signatures.length - 1].signature;
-
-          // More granular progress updates
-          setLoadingProgress(Math.min((totalSignatures.length / 1000) * 50, 49));
-          
-          // Adaptive rate limiting based on batch count to avoid hitting rate limits
-          const currentDelay = signatureBatchCounter % 5 === 0 
-            ? RATE_LIMIT.REQUEST_DELAY * 2  // Every 5th batch, wait a bit longer
-            : RATE_LIMIT.REQUEST_DELAY;
-            
-          await sleep(currentDelay);
-        } catch (error) {
-          if (error.message?.includes('429')) {
-            console.log('Rate limit hit during signature fetch, waiting...');
-            await sleep(RATE_LIMIT.WALLET_DELAY);
-            continue;
-          }
-          throw error;
-        }
+      // Check if we have cached data
+      const cachedTransactions = getFromCache(cacheKey);
+      if (cachedTransactions) {
+        console.log(`Using cached transactions for ${walletAddress}`);
+        return cachedTransactions;
       }
-
-      console.log(`Found ${totalSignatures.length} transactions in date range`);
-
-      // Second phase: Process transactions in optimized parallel batches
-      console.log('Phase 2: Processing transaction details...');
-      const processedTxs = [];
       
-      // Pre-sort signatures by timestamp to process most recent first (often more relevant)
-      totalSignatures.sort((a, b) => b.blockTime - a.blockTime);
+      console.log(`Fetching transactions for wallet: ${walletAddress}`);
       
-      // Process in chunks to avoid memory issues with large transaction counts
-      const chunkSize = 75; // Increase chunk size for better throughput
+      // Use the transaction service to fetch transactions
+      const transactions = await services.transaction.fetchSolanaTransactions(
+        walletAddress,
+        (progress) => setLoadingProgress(progress),
+        (rateLimitInfo) => setRateLimitInfo(rateLimitInfo)
+      );
       
-      for (let i = 0; i < totalSignatures.length; i += chunkSize) {
-        const chunk = totalSignatures.slice(i, i + chunkSize);
-        console.log(`Processing chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(totalSignatures.length/chunkSize)}`);
-        
-        // Process the current chunk in parallel batches
-        for (let j = 0; j < chunk.length; j += PARALLEL_BATCHES) {
-          const batchPromises = [];
-          
-          // Create a batch of promises
-          for (let k = 0; k < PARALLEL_BATCHES && j + k < chunk.length; k++) {
-            const idx = j + k;
-            const sig = chunk[idx];
-            
-            batchPromises.push(
-              (async () => {
-                try {
-                  // Use pre-fetch caching to improve performance
-                  const cacheSubKey = `tx_${sig.signature}`;
-                  const cachedTx = getFromCache(cacheSubKey);
-                  
-                  if (cachedTx) {
-                    return cachedTx;
-                  }
-                  
-                  const tx = await fetchWithRetry(async () => {
-                    return await connection.getTransaction(sig.signature, {
-                      maxSupportedTransactionVersion: 0
-                    });
-                  });
-                  
-                  if (!tx || !tx.transaction || !tx.meta) return null;
-                  
-                  const accountKeys = tx.transaction.message.accountKeys || [];
-                  const walletIndexes = accountKeys
-                    .map((key, index) => ({ key: key?.toString() || '', index }))
-                    .filter(({ key }) => key === walletAddress);
-                  
-                  if (!walletIndexes.length) return null;
-                  
-                  let txSolChange = 0;
-                  walletIndexes.forEach(({ index }) => {
-                    const preBalance = tx.meta.preBalances?.[index] ?? 0;
-                    const postBalance = tx.meta.postBalances?.[index] ?? 0;
-                    const change = (postBalance - preBalance) / LAMPORTS_PER_SOL;
-                    
-                    if (tx.transaction.message.isAccountWritable?.(index)) {
-                      txSolChange += change;
-                    }
-                  });
-                  
-                  if (Math.abs(txSolChange) > 0.000001) {
-                    // Fetch prices in parallel
-                    const [currentPrice, acquirePrice] = await Promise.all([
-                      priceService.getPriceAtTimestamp(tx.blockTime),
-                      priceService.getPriceAtTimestamp(tx.blockTime - (Math.random() * 365 * 24 * 60 * 60))
-                    ]);
-                    
-                    // Extract program IDs for token identification - more efficiently
-                    const programIds = new Set(); // Use a Set for deduplication
-                    try {
-                      tx.transaction.message.instructions.forEach(instruction => {
-                        if (instruction.programIdIndex !== undefined) {
-                          const programId = accountKeys[instruction.programIdIndex]?.toString();
-                          if (programId) {
-                            programIds.add(programId);
-                          }
-                        }
-                      });
-                    } catch (e) {
-                      // Skip if we can't extract program IDs
-                    }
-                    
-                    const programIdsArray = Array.from(programIds);
-                    
-                    // More efficient DEX checking
-                    const DEX_PROGRAM_IDS = {
-                      'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB': 'Jupiter',
-                      '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP': 'Orca',
-                      'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX': 'Serum',
-                      'RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr': 'Raydium',
-                      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium AMM'
-                    };
-                    
-                    // Check if any program ID is a DEX - more efficient
-                    const isDexTransaction = programIdsArray.some(id => DEX_PROGRAM_IDS[id]);
-                    
-                    // Find the DEX program ID if it exists
-                    const dexProgramId = programIdsArray.find(id => DEX_PROGRAM_IDS[id]);
-                    
-                    // Known token accounts - expanded list
-                    const knownTokens = {
-                      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-                      'So11111111111111111111111111111111111111112': 'SOL',
-                      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
-                      'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL',
-                      'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'BONK',
-                      '7i5KKsX2weiTkry7jA4ZwSuXGhs5eJBEjY8vVxR4pfRx': 'JUNGLE',
-                      'kinXdEcpDQeHPEuQnqmUgtYykqKGVFq6CeVX5iAHJq6': 'KIN'
-                    };
-                    
-                    // More efficient token account detection
-                    const transactionTokens = [];
-                    const accountSet = new Set(accountKeys.map(key => key?.toString()).filter(Boolean));
-                    
-                    for (const [mint, symbol] of Object.entries(knownTokens)) {
-                      if (accountSet.has(mint)) {
-                        transactionTokens.push({
-                          mint,
-                          symbol,
-                          name: symbol
-                        });
-                      }
-                    }
-                    
-                    // Determine transaction type (using proper constants from transactionUtils)
-                    let txType = TRANSACTION_TYPES.TRANSFER;
-                    let tokenAction = null;
-                    
-                    if (Math.abs(txSolChange) < 0.001) {
-                      txType = TRANSACTION_TYPES.GAS;
-                    } else if (isDexTransaction) {
-                      // Token buy/sell transactions
-                      if (transactionTokens.length > 0) {
-                        txType = TRANSACTION_TYPES.TOKEN_TRANSACTION;
-                        tokenAction = txSolChange < 0 ? "Buy" : "Sell";
-                      } else {
-                        // Generic swap if we can't determine the token
-                        txType = TRANSACTION_TYPES.SWAP;
-                      }
-                    }
-                    
-                    const processedTx = {
-                      signature: sig.signature,
-                      timestamp: tx.blockTime,
-                      solChange: txSolChange,
-                      success: !tx.meta.err,
-                      priceAtSale: currentPrice || 30,
-                      priceAtAcquisition: acquirePrice || 25,
-                      valueUSD: txSolChange * (currentPrice || 30),
-                      programId: dexProgramId || (programIdsArray[0] || 'unknown'),
-                      type: txType,
-                      tokenAction: tokenAction,
-                      tokenInfo: transactionTokens.length > 0 ? {
-                        symbol: transactionTokens[0].symbol,
-                        name: transactionTokens[0].name
-                      } : null,
-                      accounts: Array.from(accountSet),
-                      tokens: transactionTokens,
-                      programIds: programIdsArray,
-                      isDexTransaction: isDexTransaction,
-                      dex: dexProgramId ? DEX_PROGRAM_IDS[dexProgramId] : null
-                    };
-                    
-                    // Cache individual transaction
-                    saveToCache(cacheSubKey, processedTx);
-                    
-                    return processedTx;
-                  }
-                  
-                  return null;
-                } catch (error) {
-                  if (error.message?.includes('429')) {
-                    console.log('Rate limit hit, will retry in the next batch');
-                    throw error; // Let fetchWithRetry handle the retry logic
-                  }
-                  console.error(`Error processing transaction: ${error.message}`);
-                  return null;
-                }
-              })()
-            );
-          }
-          
-          // Wait for the current batch to complete
-          const results = await Promise.allSettled(batchPromises);
-          const successfulTxs = results
-            .filter(r => r.status === 'fulfilled' && r.value)
-            .map(r => r.value);
-          
-          processedTxs.push(...successfulTxs);
-          
-          // Update progress - more granular
-          const progressPercent = 50 + Math.min((processedTxs.length / totalSignatures.length) * 50, 49);
-          setLoadingProgress(progressPercent);
-          
-          // Adaptive batch delay based on success rate
-          const successRate = successfulTxs.length / batchPromises.length;
-          const adjustedDelay = successRate < 0.5 
-            ? RATE_LIMIT.BATCH_DELAY * 1.5  // If seeing high failure rate, slow down
-            : RATE_LIMIT.BATCH_DELAY;
-            
-          await sleep(adjustedDelay);
-        }
-      }
-
-      // Process and sort transactions
-      let runningBalance = 0;
-      const processedTransactions = processedTxs
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .map(tx => {
-          const oldBalance = runningBalance;
-          runningBalance += tx.solChange;
-          return {
-            ...tx,
-            runningBalance,
-            balanceBefore: oldBalance,
-            realizedGain: tx.solChange < 0 ? 
-              Math.abs(tx.solChange) * (tx.priceAtSale - tx.priceAtAcquisition) : 0
-          };
-        });
-
-      // Cache the results
-      saveToCache(cacheKey, processedTransactions);
-      setLoadingProgress(100);
-      return processedTransactions;
-
+      // Save to cache
+      saveToCache(cacheKey, transactions);
+      
+      return transactions;
     } catch (error) {
       console.error('Error in fetchSolanaTransactions:', error);
       throw error;
@@ -675,29 +389,17 @@ const [bypassCache, setBypassCache] = useState(false);
 
   // Fetch current wallet balance directly from blockchain
   const fetchCurrentBalance = async (walletAddress) => {
-    try {
-      console.log('Fetching current balance for:', walletAddress);
-      const connection = new Connection(SOLANA_RPC_ENDPOINT, 'confirmed');
-      
-      const pubKey = new PublicKey(walletAddress);
-      const balance = await connection.getBalance(pubKey);
-      
-      // Convert lamports to SOL
-      return balance / LAMPORTS_PER_SOL;
-    } catch (error) {
-      console.error('Error fetching current balance:', error);
-      return null;
-    }
+    return services.transaction.fetchCurrentBalance(walletAddress);
   };
 
   // Fetch all wallet balances
   const fetchAllWalletBalances = async () => {
-    const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
+    const addresses = formData.walletAddresses.filter(addr => addr.length >= 32);
     const walletBalances = {};
     
-    for (const address of validWalletAddresses) {
+    for (const address of addresses) {
       try {
-        const balance = await fetchCurrentBalance(address);
+        const balance = await services.transaction.fetchCurrentBalance(address);
         if (balance !== null) {
           walletBalances[address] = balance;
         }
@@ -715,30 +417,12 @@ const [bypassCache, setBypassCache] = useState(false);
 
   // Function to add a wallet to the processing queue if there's already one being processed
   const queueWalletForProcessing = (walletAddress) => {
-    if (walletAddress.length < 32) {
-      alert('Please enter a valid Solana wallet address (minimum 32 characters)');
-      return false;
-    }
-
-    // Check if a wallet is currently being processed
-    if (walletProcessingStatus.currentWallet) {
-      // If this wallet is already in the queue or completed, no need to add it again
-      if (walletProcessingStatus.queuedWallets.includes(walletAddress) || 
-          walletProcessingStatus.completedWallets.includes(walletAddress)) {
-        return false;
-      }
-      
-      // Add the wallet to the queue
-      setWalletProcessingStatus(prev => ({
-        ...prev,
-        queuedWallets: [...prev.queuedWallets, walletAddress]
-      }));
-      return true; // Wallet was successfully queued
-    }
-    
-    // If no wallet is currently being processed, process this one immediately
-    analyzeTaxes(walletAddress);
-    return false; // Wallet was not queued, but processed immediately
+    return services.walletProcessing.queueWalletForProcessing(
+      walletAddress, 
+      walletProcessingStatus,
+      setWalletProcessingStatus,
+      analyzeTaxes
+    );
   };
 
   // Function to analyze taxes with updated wallet balance fetching
@@ -747,6 +431,10 @@ const [bypassCache, setBypassCache] = useState(false);
     
     // Reset bypass flag for future runs and rate limiting info
     setBypassCache(false);
+    if (services && services.cache) {
+      services.cache.setBypassCache(false);
+    }
+    
     setRateLimitInfo({
       isLimited: false,
       retryCount: 0,
@@ -788,7 +476,7 @@ const [bypassCache, setBypassCache] = useState(false);
         }));
       } else {
         // If processing all wallets, set up a processing queue
-      if (validWalletAddresses.length > 0) {
+        if (validWalletAddresses.length > 0) {
           setWalletProcessingStatus({
             currentWallet: validWalletAddresses[0],
             queuedWallets: validWalletAddresses.slice(1),
@@ -836,8 +524,8 @@ const [bypassCache, setBypassCache] = useState(false);
               }
               
               return {
-              ...tx,
-              sourceWallet: walletAddress,
+                ...tx,
+                sourceWallet: walletAddress,
                 sourceWalletName: walletName,
                 isInternalTransfer: !!destinationWalletAddress,
                 destinationWallet: destinationWalletAddress,
@@ -851,7 +539,7 @@ const [bypassCache, setBypassCache] = useState(false);
               const otherWalletTxs = transactions.filter(tx => tx.sourceWallet !== specificWalletAddress);
               allTransactions = [...otherWalletTxs, ...taggedTransactions];
             } else {
-            allTransactions = [...allTransactions, ...taggedTransactions];
+              allTransactions = [...allTransactions, ...taggedTransactions];
             }
             
             setLoadingProgress((i + 1) / validWalletAddresses.length * 100);
@@ -1200,7 +888,7 @@ const [bypassCache, setBypassCache] = useState(false);
                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
                   Add Your Wallets
                 </span>
-            </h1>
+              </h1>
               <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay mb-12">
                 Let's connect your crypto wallets to analyze your transactions
               </p>
@@ -1212,25 +900,25 @@ const [bypassCache, setBypassCache] = useState(false);
                   {formData.walletAddresses.map((address, index) => (
                     <div key={index} className="mb-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
-                <div>
-                  <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                        <div>
+                          <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
                             Wallet Name
-                  </label>
-                  <input
-                    type="text"
+                          </label>
+                          <input
+                            type="text"
                             value={formData.walletNames[index] || `Wallet ${index + 1}`}
                             onChange={(e) => handleWalletNameChange(index, e.target.value)}
                             className="input w-full"
                             placeholder="My Main Wallet"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
                             Solana Wallet Address
-                  </label>
+                          </label>
                           <div className="flex gap-2">
-                  <input
-                    type="text"
+                            <input
+                              type="text"
                               value={address}
                               onChange={(e) => {
                                 const updatedAddresses = [...formData.walletAddresses];
@@ -1258,8 +946,8 @@ const [bypassCache, setBypassCache] = useState(false);
                                 Remove
                               </button>
                             )}
-                </div>
-              </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1288,7 +976,7 @@ const [bypassCache, setBypassCache] = useState(false);
                   </div>
                 </div>
               </div>
-
+              
               <div className="mt-6">
                 <button
                   onClick={goBackToPreviousStep}
@@ -1324,62 +1012,62 @@ const [bypassCache, setBypassCache] = useState(false);
                   <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Traditional Income</h2>
                   
                   <div className="grid grid-cols-1 gap-6 mb-8">
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Salary Income
-                    </label>
-                    <input
-                      type="number"
-                      name="salary"
-                      value={formData.salary}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
+                    <div>
+                      <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                        Salary Income
+                      </label>
+                      <input
+                        type="number"
+                        name="salary"
+                        value={formData.salary}
+                        onChange={handleInputChange}
+                        className="input"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                        Stock Trading Income
+                      </label>
+                      <input
+                        type="number"
+                        name="stockIncome"
+                        value={formData.stockIncome}
+                        onChange={handleInputChange}
+                        className="input"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                        Real Estate Income
+                      </label>
+                      <input
+                        type="number"
+                        name="realEstateIncome"
+                        value={formData.realEstateIncome}
+                        onChange={handleInputChange}
+                        className="input"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
+                        Dividend Income
+                      </label>
+                      <input
+                        type="number"
+                        name="dividends"
+                        value={formData.dividends}
+                        onChange={handleInputChange}
+                        className="input"
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Stock Trading Income
-                    </label>
-                    <input
-                      type="number"
-                      name="stockIncome"
-                      value={formData.stockIncome}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Real Estate Income
-                    </label>
-                    <input
-                      type="number"
-                      name="realEstateIncome"
-                      value={formData.realEstateIncome}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Dividend Income
-                    </label>
-                    <input
-                      type="number"
-                      name="dividends"
-                      value={formData.dividends}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                </div>
-              </div>
-
+                  
                   <div className="flex justify-between">
-                <button
+                    <button
                       onClick={goBackToPreviousStep}
                       className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
                     >
@@ -1388,28 +1076,28 @@ const [bypassCache, setBypassCache] = useState(false);
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                         </svg>
                         Back
-                    </span>
-                </button>
-                
+                      </span>
+                    </button>
+                    
                     <div className="flex space-x-3">
-                  <button
+                      <button
                         onClick={skipToResults}
                         className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                  >
+                      >
                         Skip
-                  </button>
-                
-                  <button
+                      </button>
+                      
+                      <button
                         onClick={skipToResults}
                         className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                  >
+                      >
                         Continue to Dashboard
-                  </button>
+                      </button>
                     </div>
                   </div>
+                </div>
               </div>
-            </div>
-
+              
               {loadingBalances && (
                 <div className="mt-8 bg-white dark:bg-geist-accent-800 rounded-xl p-4 max-w-md mx-auto animate-fade-in-delay">
                   <p className="mb-2 text-geist-accent-600 dark:text-geist-accent-300">Fetching your wallet balances...</p>
@@ -1440,8 +1128,8 @@ const [bypassCache, setBypassCache] = useState(false);
                 </h1>
                 <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay">
                   Track all your assets in one place
-                      </p>
-                    </div>
+                </p>
+              </div>
 
               <div className="max-w-6xl mx-auto px-4 py-4">
                 {/* Transaction Status Section - Always visible at the top */}
@@ -1455,7 +1143,7 @@ const [bypassCache, setBypassCache] = useState(false);
                           className="bg-gradient-to-r from-geist-success to-blue-500 h-4 rounded-full transition-all duration-300" 
                           style={{ width: `${loadingProgress}%` }}
                         ></div>
-                    </div>
+                      </div>
                       <p className="text-geist-accent-900 dark:text-geist-foreground font-medium mb-2">
                         Processing Transactions... {loadingProgress.toFixed(0)}%
                       </p>
@@ -1473,7 +1161,7 @@ const [bypassCache, setBypassCache] = useState(false);
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                   </svg>
-                    </div>
+                                </div>
                                 <div>
                                   <div className="text-sm font-medium text-geist-accent-900 dark:text-geist-foreground">
                                     {formData.walletNames[formData.walletAddresses.indexOf(walletProcessingStatus.currentWallet)] || 'Wallet'}
@@ -1551,7 +1239,7 @@ const [bypassCache, setBypassCache] = useState(false);
                           <div className="mt-2 flex items-center justify-between text-xs text-amber-500">
                             <span>Retry attempts: {rateLimitInfo.retryCount}/{RATE_LIMIT.MAX_RETRIES}</span>
                             <span>Throttle events: {rateLimitInfo.totalDelays}</span>
-                    </div>
+                          </div>
                         </div>
                       )}
                       
@@ -1597,7 +1285,7 @@ const [bypassCache, setBypassCache] = useState(false);
                         >
                           Edit Information
                         </button>
-                  </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1834,8 +1522,8 @@ const [bypassCache, setBypassCache] = useState(false);
                             Waiting for {walletProcessingStatus.currentWallet ? 
                               `${formData.walletNames[formData.walletAddresses.indexOf(walletProcessingStatus.currentWallet)] || 'current wallet'}` : 
                               'previous wallets'} to complete.
-                      </p>
-                    </div>
+                          </p>
+                        </div>
                       </div>
                     )}
 
@@ -1891,8 +1579,8 @@ const [bypassCache, setBypassCache] = useState(false);
                             {walletProcessingStatus.queuedWallets.length > 0 && (
                               <span> • Queued wallets: {walletProcessingStatus.queuedWallets.length}</span>
                             )}
-                      </p>
-                    </div>
+                          </p>
+                        </div>
                       </div>
                     )}
                     
@@ -1922,8 +1610,8 @@ const [bypassCache, setBypassCache] = useState(false);
                         <h3 className="text-xl font-medium text-geist-accent-900 dark:text-geist-foreground mb-2">No Transactions Yet</h3>
                         <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-4 max-w-md mx-auto">
                           Click "Analyze Transactions" in the Transaction Status section above to load your transaction data.
-                      </p>
-                    </div>
+                        </p>
+                      </div>
                     )}
                   </div>
 
@@ -1950,8 +1638,8 @@ const [bypassCache, setBypassCache] = useState(false);
                           </div>
                           <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                             Total {results.crypto.realizedGains >= 0 ? 'Gains' : 'Losses'}
-                  </div>
-                </div>
+                          </div>
+                        </div>
 
                         <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
                           <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
@@ -1960,7 +1648,7 @@ const [bypassCache, setBypassCache] = useState(false);
                           <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                             Estimated Tax
                           </div>
-                </div>
+                        </div>
 
                         <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
                           <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
@@ -1984,75 +1672,75 @@ const [bypassCache, setBypassCache] = useState(false);
                         </p>
                       </div>
                     )}
-
-                {/* Tax Forms Section */}
+                    
+                    {/* Tax Forms Section */}
                     {results && (
-                <div className="mt-8 pt-8 border-t border-geist-accent-200 dark:border-geist-accent-700">
-                  <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Required Tax Forms</h3>
-                  
+                      <div className="mt-8 pt-8 border-t border-geist-accent-200 dark:border-geist-accent-700">
+                        <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Required Tax Forms</h3>
+                        
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
                                 <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 8949</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Sales and Other Dispositions of Capital Assets</p>
-                        </div>
-                        <button
-                          onClick={() => generateTaxForm('8949')}
+                                <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Sales and Other Dispositions of Capital Assets</p>
+                              </div>
+                              <button
+                                onClick={() => generateTaxForm('8949')}
                                 className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
-                      </div>
-                      <p className="text-xs text-geist-accent-500">Required for reporting your crypto trades</p>
-                    </div>
+                              >
+                                Download
+                              </button>
+                            </div>
+                            <p className="text-xs text-geist-accent-500">Required for reporting your crypto trades</p>
+                          </div>
 
                           <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
                                 <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule D</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Capital Gains and Losses</p>
-                        </div>
-                        <button
-                          onClick={() => generateTaxForm('scheduleD')}
+                                <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Capital Gains and Losses</p>
+                              </div>
+                              <button
+                                onClick={() => generateTaxForm('scheduleD')}
                                 className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
-                      </div>
-                      <p className="text-xs text-geist-accent-500">Summary of all capital gains/losses</p>
-                    </div>
+                              >
+                                Download
+                              </button>
+                            </div>
+                            <p className="text-xs text-geist-accent-500">Summary of all capital gains/losses</p>
+                          </div>
 
                           <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
                                 <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 1040</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">U.S. Individual Income Tax Return</p>
-                        </div>
-                        <button
-                          onClick={() => generateTaxForm('1040')}
+                                <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">U.S. Individual Income Tax Return</p>
+                              </div>
+                              <button
+                                onClick={() => generateTaxForm('1040')}
                                 className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
-                      </div>
-                      <p className="text-xs text-geist-accent-500">Main tax return form</p>
-                    </div>
-                  </div>
-
+                              >
+                                Download
+                              </button>
+                            </div>
+                            <p className="text-xs text-geist-accent-500">Main tax return form</p>
+                          </div>
+                        </div>
+                        
                         <div className="mt-4 flex justify-center">
-                    <button
-                      onClick={generateAllForms}
+                          <button
+                            onClick={generateAllForms}
                             className="px-6 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                    >
-                      Download All Forms
-                    </button>
+                          >
+                            Download All Forms
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
-                  </div>
-                </div>
-          </div>
             </div>
           )}
         </div>
