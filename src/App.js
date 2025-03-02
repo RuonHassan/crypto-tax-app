@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 // Add CSS import for animations if not already included in your app
 import './styles/animations.css';
 
 import LandingPage from './components/LandingPage';
 import UserInformationPage from './components/UserInformationPage';
 import { useAuth } from './contexts/AuthContext';
+import AppLayout from './components/AppLayout';
 
 // Add these imports at the top of your file
 import { 
@@ -184,6 +185,22 @@ const [bypassCache, setBypassCache] = useState(false);
     completedWallets: [],
     processingAll: false
   });
+  
+  const [userProfile, setUserProfile] = useState(null);
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [showWalletInputs, setShowWalletInputs] = useState(false);
+  const [activeSection, setActiveSection] = useState('dashboard'); // To track which section is active
+  
+  // Define walletMap (mapping from wallet addresses to wallet names)
+  const walletMap = useMemo(() => {
+    const map = {};
+    formData.walletAddresses.forEach((address, index) => {
+      if (address && address.length > 0) {
+        map[address] = formData.walletNames[index] || `Wallet ${index + 1}`;
+      }
+    });
+    return map;
+  }, [formData.walletAddresses, formData.walletNames]);
   
   // Set app as loaded after a small delay
   useEffect(() => {
@@ -1126,6 +1143,8 @@ const [bypassCache, setBypassCache] = useState(false);
   // Go to dashboard
   const goToDashboard = () => {
     setShowUserInfoPage(false);
+    setCurrentPage('dashboard');
+    setActiveSection('dashboard');
     
     // Refresh wallet balances when going back to dashboard
     if (results) {
@@ -1170,915 +1189,431 @@ const [bypassCache, setBypassCache] = useState(false);
     }
   };
 
+  // Handle navigation between different sections
+  const handleNavigate = (page) => {
+    setCurrentPage(page);
+    
+    // Handle different page navigations
+    if (page === 'dashboard') {
+      setShowUserInfoPage(false);
+      setActiveSection('dashboard');
+    } 
+    else if (page === 'account') {
+      setShowUserInfoPage(true);
+    }
+    else if (page === 'reports') {
+      setShowUserInfoPage(false);
+      setActiveSection('reports');
+    }
+    else if (page === 'wallets') {
+      setShowUserInfoPage(false);
+      setActiveSection('wallets');
+      setShowWalletInputs(true);
+    }
+  };
+  
+  // Update current page when showing user info
+  useEffect(() => {
+    if (showUserInfoPage) {
+      setCurrentPage('account');
+    }
+  }, [showUserInfoPage]);
+
+  // Show wallet inputs on initial load or when adding wallets
+  useEffect(() => {
+    if (formData.walletAddresses.length === 0 || 
+        (formData.walletAddresses.length === 1 && formData.walletAddresses[0] === '')) {
+      setShowWalletInputs(true);
+    }
+  }, [formData.walletAddresses]);
+
   return (
-    <div className={`min-h-screen bg-gradient-to-b from-geist-accent-100 to-white dark:from-geist-background dark:to-geist-accent-800 ${appLoaded ? 'fade-in' : 'opacity-0'}`}>
-      <DarkModeToggle />
-      
+    <div className={`${appLoaded ? 'fade-in' : 'opacity-0'}`}>
       {showLandingPage ? (
         <LandingPage onGetStarted={startOnboarding} />
-      ) : showUserInfoPage ? (
-        <UserInformationPage 
-          formData={formData}
-          handleInputChange={handleInputChange}
-          handleWalletNameChange={handleWalletNameChange}
-          analyzeTaxes={analyzeTaxes}
-          loading={loading}
-          loadingProgress={loadingProgress}
-          results={results}
-          clearTransactionCache={clearTransactionCache}
-          clearAllTransactionCache={clearAllTransactionCache}
-          setFormData={setFormData}
-          goBackToDashboard={goToDashboard}
-          walletProcessingStatus={walletProcessingStatus}
-          queueWalletForProcessing={queueWalletForProcessing}
-        />
       ) : (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="py-6">
-            <div className="flex justify-between items-center">
-              <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground flex items-center">
-                <span className="text-3xl mr-2 bg-geist-success bg-opacity-90 text-white px-3 py-1 rounded-lg transform -rotate-3">Tax</span>
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500">AI</span>
-              </div>
-              <button 
-                onClick={toggleUserInfoPage} 
-                className="px-4 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-lg hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors flex items-center"
-              >
-                <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Manage Information
-              </button>
-            </div>
-          </nav>
-
-          {/* Step 1: Wallet Input */}
-          {onboardingStep === 1 && (
-            <div className="py-12 text-center relative">
-              {/* Decorative elements */}
-              <div className="absolute -top-20 -left-20 w-64 h-64 bg-geist-success bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-              <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500 bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-              
-              <h1 className="text-4xl font-bold mb-2 animate-fade-in">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
-                  Add Your Wallets
-                </span>
+        <AppLayout 
+          toggleUserInfoPage={toggleUserInfoPage}
+          currentPage={currentPage}
+          userProfile={formData}
+          onNavigate={handleNavigate}
+        >
+          {showUserInfoPage ? (
+            <UserInformationPage 
+              formData={formData}
+              handleInputChange={handleInputChange}
+              handleWalletNameChange={handleWalletNameChange}
+              analyzeTaxes={analyzeTaxes}
+              loading={loading}
+              loadingProgress={loadingProgress}
+              results={results}
+              clearTransactionCache={clearTransactionCache}
+              clearAllTransactionCache={clearAllTransactionCache}
+              setFormData={setFormData}
+              goBackToDashboard={goToDashboard}
+              walletProcessingStatus={walletProcessingStatus}
+              queueWalletForProcessing={queueWalletForProcessing}
+              user={user}
+            />
+          ) : (
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              {/* Conditional rendering based on active section */}
+              {activeSection === 'wallets' && showWalletInputs && (
+                /* Wallet Input Section */
+                <div className="mt-12 max-w-3xl mx-auto text-center">
+                  <h1 className="text-4xl font-bold mb-2 animate-fade-in">
+                    <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
+                      Connect Your Wallets
+                    </span>
             </h1>
-              <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay mb-12">
-                Let's connect your crypto wallets to analyze your transactions
-              </p>
-
-              <div className="max-w-2xl mx-auto">
-                <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
-                  <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Your Wallets</h2>
+                  <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay mb-12">
+                    Add your Solana wallet addresses to begin transaction analysis
+                  </p>
                   
-                  {formData.walletAddresses.map((address, index) => (
-                    <div key={index} className="mb-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
-                <div>
-                  <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                            Wallet Name
+                  <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-8 animate-fade-in-delay-2">
+                    <div className="space-y-6">
+                      {/* Dynamic wallet inputs */}
+                      {formData.walletAddresses.map((address, index) => (
+                        <div key={index} className="flex space-x-4">
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-geist-accent-600 dark:text-geist-accent-300 text-left mb-2">
+                              Wallet Name
                   </label>
                   <input
                     type="text"
-                            value={formData.walletNames[index] || `Wallet ${index + 1}`}
-                            onChange={(e) => handleWalletNameChange(index, e.target.value)}
-                            className="input w-full"
-                            placeholder="My Main Wallet"
+                              value={formData.walletNames[index] || ''}
+                              onChange={(e) => handleWalletNameChange(index, e.target.value)}
+                              className="block w-full px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 border border-geist-accent-200 dark:border-geist-accent-600 rounded-xl focus:ring-geist-success focus:border-geist-success transition-colors"
+                              placeholder="My Wallet"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                            Solana Wallet Address
+                          
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-geist-accent-600 dark:text-geist-accent-300 text-left mb-2">
+                              Wallet Address
                   </label>
-                          <div className="flex gap-2">
+                            <div className="flex">
                   <input
                     type="text"
-                              value={address}
-                              onChange={(e) => {
-                                const updatedAddresses = [...formData.walletAddresses];
-                                updatedAddresses[index] = e.target.value;
-                                handleInputChange({ 
-                                  target: { name: 'walletAddresses', value: updatedAddresses }
+                                value={address}
+                                onChange={(e) => {
+                                  const newAddresses = [...formData.walletAddresses];
+                                  newAddresses[index] = e.target.value;
+                                  setFormData({
+                                    ...formData,
+                                    walletAddresses: newAddresses
+                                  });
+                                }}
+                                className="block w-full px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 border border-geist-accent-200 dark:border-geist-accent-600 rounded-l-xl focus:ring-geist-success focus:border-geist-success transition-colors"
+                                placeholder="Enter Solana wallet address"
+                              />
+                              <button
+                                onClick={() => queueWalletForProcessing(address)}
+                                disabled={!address || address.length < 32 || walletProcessingStatus.currentWallet === address || walletProcessingStatus.queuedWallets.includes(address)}
+                                className="px-4 py-3 bg-geist-success text-white font-medium rounded-r-xl hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {walletProcessingStatus.currentWallet === address ? (
+                                  <span className="flex items-center">
+                                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Processing
+                                  </span>
+                                ) : walletProcessingStatus.queuedWallets.includes(address) ? (
+                                  <span className="flex items-center">
+                                    Queued
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center">
+                                    Connect
+                                  </span>
+                                )}
+                              </button>
+                </div>
+              </div>
+
+                          {index > 0 && (
+                            <button
+                              onClick={() => {
+                                const newAddresses = [...formData.walletAddresses];
+                                newAddresses.splice(index, 1);
+                                const newNames = [...formData.walletNames];
+                                newNames.splice(index, 1);
+                                setFormData({
+                                  ...formData,
+                                  walletAddresses: newAddresses,
+                                  walletNames: newNames
                                 });
                               }}
-                              className="input w-full"
-                              placeholder="Solana Wallet Address"
-                            />
-                            {index > 0 && (
-                              <button
-                                onClick={() => {
-                                  const updatedAddresses = formData.walletAddresses.filter((_, i) => i !== index);
-                                  const updatedNames = formData.walletNames.filter((_, i) => i !== index);
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    walletAddresses: updatedAddresses,
-                                    walletNames: updatedNames
-                                  }));
-                                }}
-                                className="px-4 py-2 bg-rose-100 text-rose-600 dark:bg-rose-900 dark:text-rose-300 rounded-lg hover:bg-rose-200 dark:hover:bg-rose-800 transition-colors"
-                              >
-                                Remove
-                              </button>
-                            )}
+                              className="self-end px-3 py-3 text-geist-accent-600 hover:text-geist-accent-900 dark:text-geist-accent-400 dark:hover:text-geist-accent-100"
+                            >
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          )}
                 </div>
-              </div>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  <div className="flex justify-between mt-8">
-                    <button 
-                      onClick={() => {
-                        setFormData(prev => ({
-                          ...prev,
-                          walletAddresses: [...prev.walletAddresses, ''],
-                          walletNames: [...prev.walletNames, `Wallet ${prev.walletAddresses.length + 1}`]
-                        }));
-                      }}
-                      className="px-4 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-lg hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                    >
-                      Add Another Wallet
-                    </button>
-                    
-                    <button
-                      onClick={goToTraditionalIncomeStep}
-                      disabled={!formData.walletAddresses.some(addr => addr.length >= 32)}
-                      className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Continue
-                    </button>
-                  </div>
-                </div>
+                      ))}
               </div>
 
-              <div className="mt-6">
-                <button
-                  onClick={goBackToPreviousStep}
-                  className="px-6 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-medium hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors inline-flex items-center"
-                >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                  </svg>
-                  Back to Landing Page
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 2: Traditional Income */}
-          {onboardingStep === 2 && (
-            <div className="py-12 text-center relative">
-              {/* Decorative elements */}
-              <div className="absolute -top-20 -left-20 w-64 h-64 bg-geist-success bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-              <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500 bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-              
-              <h1 className="text-4xl font-bold mb-2 animate-fade-in">
-                <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
-                  Non-Crypto Income
-                </span>
-              </h1>
-              <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay mb-12">
-                Add your other income sources for a complete tax picture
-              </p>
-
-              <div className="max-w-2xl mx-auto">
-                <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
-                  <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Traditional Income</h2>
-                  
-                  <div className="grid grid-cols-1 gap-6 mb-8">
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Salary Income
-                    </label>
-                    <input
-                      type="number"
-                      name="salary"
-                      value={formData.salary}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Stock Trading Income
-                    </label>
-                    <input
-                      type="number"
-                      name="stockIncome"
-                      value={formData.stockIncome}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Real Estate Income
-                    </label>
-                    <input
-                      type="number"
-                      name="realEstateIncome"
-                      value={formData.realEstateIncome}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">
-                      Dividend Income
-                    </label>
-                    <input
-                      type="number"
-                      name="dividends"
-                      value={formData.dividends}
-                      onChange={handleInputChange}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                </div>
-              </div>
-
-                  <div className="flex justify-between">
-                <button
-                      onClick={goBackToPreviousStep}
-                      className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                    >
-                      <span className="flex items-center">
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    <div className="mt-6 flex">
+                      <button
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            walletAddresses: [...formData.walletAddresses, ''],
+                            walletNames: [...formData.walletNames, `My Wallet ${formData.walletAddresses.length + 1}`]
+                          });
+                        }}
+                        className="flex items-center px-4 py-2 text-geist-accent-700 dark:text-geist-accent-300 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-lg hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
+                      >
+                        <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                         </svg>
-                        Back
-                    </span>
-                </button>
-                
-                    <div className="flex space-x-3">
-                  <button
-                        onClick={skipToResults}
-                        className="px-6 py-3 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-xl font-semibold hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                  >
-                        Skip
-                  </button>
-                
-                  <button
-                        onClick={skipToResults}
-                        className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                  >
-                        Continue to Dashboard
-                  </button>
-                    </div>
-                  </div>
+                        Add Another Wallet
+                      </button>
+                </div>
               </div>
-            </div>
 
-              {loadingBalances && (
-                <div className="mt-8 bg-white dark:bg-geist-accent-800 rounded-xl p-4 max-w-md mx-auto animate-fade-in-delay">
-                  <p className="mb-2 text-geist-accent-600 dark:text-geist-accent-300">Fetching your wallet balances...</p>
-                  <div className="flex justify-center">
-                    <svg className="animate-spin h-6 w-6 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
+                  <div className="mt-8 flex justify-center">
+                <button
+                      onClick={() => {
+                        if (formData.walletAddresses.some(addr => addr.length >= 32)) {
+                          // Skip straight to analyzing taxes if we have a valid wallet address
+                          skipToResults();
+                        }
+                      }}
+                      disabled={!formData.walletAddresses.some(addr => addr.length >= 32) || loading}
+                      className="px-8 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none disabled:hover:shadow-md"
+                >
+                  {loading ? (
+                        <span className="flex items-center">
+                          <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Processing...
+                    </span>
+                  ) : (
+                        <span>
+                          Continue to Dashboard
+                        </span>
+                  )}
+                </button>
                   </div>
-                  <p className="mt-2 text-sm text-geist-accent-500">This information will be displayed in your dashboard.</p>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Step 3: Dashboard - Restructured */}
-          {onboardingStep === 3 && (
-            <div>
-              <div className="py-8 text-center relative">
-                {/* Decorative elements */}
-                <div className="absolute -top-20 -left-20 w-64 h-64 bg-geist-success bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-                <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-blue-500 bg-opacity-10 rounded-full blur-3xl dark:bg-opacity-20 pointer-events-none"></div>
-                
-                <h1 className="text-4xl font-bold mb-2 animate-fade-in">
-                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
-                    Crypto Tax Dashboard
-                  </span>
-                </h1>
-                <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay">
-                  Track all your assets in one place
-                      </p>
-                    </div>
-
-              <div className="max-w-6xl mx-auto px-4 py-4">
-                {/* Transaction Status Section - Always visible at the top */}
-                <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 mb-8 transition-all duration-300 hover:shadow-lg animate-fade-in">
-                  <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Transaction Status</h2>
-                  
-                  {loadingTransactions ? (
-                    <div className="text-center">
-                      <div className="w-full bg-geist-accent-200 dark:bg-geist-accent-700 rounded-full h-4 mb-6">
-                        <div 
-                          className="bg-gradient-to-r from-geist-success to-blue-500 h-4 rounded-full transition-all duration-300" 
-                          style={{ width: `${loadingProgress}%` }}
-                        ></div>
-                    </div>
-                      <p className="text-geist-accent-900 dark:text-geist-foreground font-medium mb-2">
-                        Processing Transactions... {loadingProgress.toFixed(0)}%
-                      </p>
-                      
-                      {/* Wallet Processing Queue Status */}
-                      {walletProcessingStatus.processingAll && (
-                        <div className="mb-4">
-                          <div className="bg-geist-accent-50 dark:bg-geist-accent-700/50 p-4 rounded-lg text-left">
-                            <h3 className="text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-2">Wallet Processing Queue:</h3>
-                            
-                            {walletProcessingStatus.currentWallet && (
-                              <div className="flex items-center mb-3 bg-geist-accent-100 dark:bg-geist-accent-700 p-2 rounded-md">
-                                <div className="mr-2 relative">
-                                  <svg className="animate-spin h-5 w-5 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                    </div>
-                                <div>
-                                  <div className="text-sm font-medium text-geist-accent-900 dark:text-geist-foreground">
-                                    {formData.walletNames[formData.walletAddresses.indexOf(walletProcessingStatus.currentWallet)] || 'Wallet'}
-                                  </div>
-                                  <div className="text-xs text-geist-accent-500">
-                                    Currently Processing: {walletProcessingStatus.currentWallet.slice(0, 6)}...{walletProcessingStatus.currentWallet.slice(-4)}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                            
-                            {walletProcessingStatus.queuedWallets.length > 0 && (
-                              <div className="mb-2">
-                                <div className="text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-1">In Queue:</div>
-                                {walletProcessingStatus.queuedWallets.map((address, index) => (
-                                  <div key={address} className="flex items-center mb-1 ml-2 text-sm text-geist-accent-600 dark:text-geist-accent-400">
-                                    <div className="w-5 h-5 mr-2 flex items-center justify-center">
-                                      <span className="h-2 w-2 bg-geist-accent-400 dark:bg-geist-accent-500 rounded-full"></span>
-                                    </div>
-                                    <span>
-                                      {formData.walletNames[formData.walletAddresses.indexOf(address)] || `Wallet ${index + 1}`} 
-                                      <span className="text-xs ml-1 text-geist-accent-500">
-                                        ({address.slice(0, 6)}...{address.slice(-4)})
-                                      </span>
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            
-                            {walletProcessingStatus.completedWallets.length > 0 && (
-                              <div>
-                                <div className="text-sm font-medium text-geist-accent-700 dark:text-geist-accent-300 mb-1">Completed:</div>
-                                {walletProcessingStatus.completedWallets.map((address, index) => (
-                                  <div key={address} className="flex items-center mb-1 ml-2 text-sm text-geist-success dark:text-green-400">
-                                    <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    <span>
-                                      {formData.walletNames[formData.walletAddresses.indexOf(address)] || `Wallet ${index + 1}`} 
-                                      <span className="text-xs ml-1 text-geist-accent-500">
-                                        ({address.slice(0, 6)}...{address.slice(-4)})
-                                      </span>
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            
-                            <div className="text-xs text-geist-accent-500 mt-3">
-                              Data for completed wallets is already visible in the dashboard below.
-                              <br />Select a wallet from the Portfolio section to view its specific transactions.
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-4">
-                        We're analyzing your wallet transactions and calculating your taxes. Your portfolio is already visible above.
-                      </p>
-                      
-                      {/* Rate limiting info */}
-                      {rateLimitInfo.isLimited && (
-                        <div className="mt-2 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-left">
-                          <p className="text-amber-700 dark:text-amber-400 flex items-center mb-1">
-                            <svg className="w-5 h-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            <span className="font-medium">API Rate Limiting Detected</span>
-                          </p>
-                          <p className="text-sm text-amber-600 dark:text-amber-300">
-                            We're being rate-limited by the blockchain API. This is normal for large wallets and will resolve automatically. 
-                            The analysis will continue but may take longer than expected.
-                          </p>
-                          <div className="mt-2 flex items-center justify-between text-xs text-amber-500">
-                            <span>Retry attempts: {rateLimitInfo.retryCount}/{RATE_LIMIT.MAX_RETRIES}</span>
-                            <span>Throttle events: {rateLimitInfo.totalDelays}</span>
-                    </div>
-                        </div>
-                      )}
-                      
-                      <div className="mt-4 text-xs text-geist-accent-500 bg-geist-accent-50 dark:bg-geist-accent-700/50 p-3 rounded">
-                        <p className="mb-1"><span className="font-medium">Processing large wallets:</span> Wallets with many transactions will take longer to analyze.</p>
-                        <p><span className="font-medium">API rate limits:</span> Blockchain API rate limits may slow down processing of very active wallets.</p>
-                      </div>
-                    </div>
-                  ) : !transactions.length ? (
-                    <div className="text-center px-4 py-12 border-2 border-dashed border-geist-accent-300 dark:border-geist-accent-600 rounded-xl">
-                      <div className="w-16 h-16 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <svg className="w-8 h-8 text-geist-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </div>
-                      <h3 className="text-xl font-medium text-geist-accent-900 dark:text-geist-foreground mb-2">No Transaction Data Yet</h3>
-                      <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-6">
-                        Click "Analyze Transactions" to begin processing your wallet activity. Your wallet balances are already displayed above.
-                      </p>
-                      <button
-                        onClick={analyzeTaxes}
-                        className="px-6 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
-                      >
-                        Analyze Transactions
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-center text-geist-success dark:text-green-300 mb-2">
-                      <svg className="w-12 h-12 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="font-medium">Transaction data loaded successfully!</p>
-                      <div className="flex justify-center mt-4 gap-4">
-                        <button
-                          onClick={analyzeTaxes}
-                          className="px-6 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-lg hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                        >
-                          Refresh Data
-                        </button>
-                        <button
-                          onClick={toggleUserInfoPage}
-                          className="px-6 py-2 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-lg hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors"
-                        >
-                          Edit Information
-                        </button>
+              
+              {activeSection === 'dashboard' && (
+                /* Dashboard Content */
+                <div className="mt-6 grid grid-cols-1 gap-8">
+                  {/* Transaction Dashboard */}
+                  <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
+                    <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Transaction Dashboard</h2>
+                    
+                    <TransactionDashboard 
+                      transactions={transactions} 
+                      selectedWallet={selectedWallet}
+                      walletMap={walletMap}
+                      walletAddresses={formData.walletAddresses}
+                      walletNames={formData.walletNames}
+                      onWalletSelect={setSelectedWallet}
+                    />
                   </div>
+                  
+                  {/* Tax forms and calculations */}
+                {results && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      {/* Tax Forms */}
+                      <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in col-span-1">
+                        <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Tax Forms</h2>
+                        
+                        <div className="space-y-4">
+                  <button
+                            onClick={() => generateTaxForm('8949')}
+                            className="w-full flex items-center justify-between px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
+                  >
+                            <span className="font-medium text-geist-accent-900 dark:text-geist-foreground">Form 8949</span>
+                            <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                  </button>
+                
+                  <button
+                            onClick={() => generateTaxForm('schedule-d')}
+                            className="w-full flex items-center justify-between px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
+                  >
+                            <span className="font-medium text-geist-accent-900 dark:text-geist-foreground">Schedule D</span>
+                            <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                  </button>
+                          
+                          <button 
+                            onClick={() => generateTaxForm('1040')}
+                            className="w-full flex items-center justify-between px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
+                          >
+                            <span className="font-medium text-geist-accent-900 dark:text-geist-foreground">Form 1040</span>
+                            <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                          </button>
+                          
+                          <button 
+                            onClick={() => generateTaxForm('schedule-1')}
+                            className="w-full flex items-center justify-between px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
+                          >
+                            <span className="font-medium text-geist-accent-900 dark:text-geist-foreground">Schedule 1</span>
+                            <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                          </button>
+                          
+                          <button 
+                            onClick={generateAllForms}
+                            className="w-full mt-4 px-4 py-3 bg-geist-success bg-opacity-90 text-white rounded-xl font-medium hover:bg-opacity-100 transition-colors"
+                          >
+                            Generate All Forms
+                          </button>
+              </div>
+            </div>
+
+                      {/* Tax Summary */}
+                      <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in col-span-2">
+                        <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">
+                          Tax Summary for {getFiscalYearDates().year}
+                        </h2>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5">
+                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Total Capital Gains</div>
+                            <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                              {results.totalCapitalGains > 0 ? '+' : ''}{results.totalCapitalGains.toLocaleString('en-US', {
+                                style: 'currency',
+                                currency: 'USD'
+                              })}
                     </div>
+                    </div>
+                          
+                          <div className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5">
+                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Estimated Tax Obligation</div>
+                            <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                              {results.estimatedTaxes.toLocaleString('en-US', {
+                                style: 'currency',
+                                currency: 'USD'
+                              })}
+                    </div>
+                    </div>
+                          
+                          <div className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5">
+                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Short-term Gains</div>
+                            <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                              {results.shortTermGains > 0 ? '+' : ''}{results.shortTermGains.toLocaleString('en-US', {
+                                style: 'currency',
+                                currency: 'USD'
+                              })}
+                  </div>
+                </div>
+
+                          <div className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5">
+                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300 mb-1">Long-term Gains</div>
+                            <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground">
+                              {results.longTermGains > 0 ? '+' : ''}{results.longTermGains.toLocaleString('en-US', {
+                                style: 'currency',
+                                currency: 'USD'
+                              })}
+                    </div>
+                    </div>
+                    </div>
+                    </div>
+                  </div>
                   )}
                 </div>
-
-                {/* Dashboard Sections */}
-                <div className="animate-fade-in-delay-2">
-                  {/* Portfolio Section */}
-                  <div className="mb-8 bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8">
-                    <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Portfolio</h2>
-                    
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-base font-medium text-geist-accent-700 dark:text-geist-accent-300">Balance Overview</h3>
-                      <button 
-                        onClick={fetchWalletBalances}
-                        disabled={loadingBalances}
-                        className="px-3 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 rounded-lg hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 transition-colors flex items-center text-sm"
-                      >
-                        {loadingBalances ? (
-                          <>
-                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-geist-accent-900 dark:text-geist-accent-100" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Fetching...
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                            Refresh Balances
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                          {formData.walletAddresses.filter(addr => addr.length >= 32).length}
-                        </div>
-                        <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                          Connected Wallets
-                        </div>
-                      </div>
-
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        {loadingBalances ? (
-                          <div className="flex items-center justify-center h-full">
-                            <svg className="animate-spin h-6 w-6 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="text-3xl font-bold text-geist-success dark:text-green-300 mb-2">
-                              {Object.values(walletBalances).reduce((sum, balance) => sum + balance, 0).toFixed(4)} SOL
-                            </div>
-                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                              Current Balance
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                          {loadingTransactions ? (
-                            <div className="flex items-center justify-center">
-                              <svg className="animate-spin h-6 w-6 text-geist-accent-900 dark:text-geist-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                            </div>
-                          ) : transactions.length}
-                        </div>
-                        <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                          Total Transactions
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Wallet Breakdown */}
-                    <div className="mt-8 pt-6 border-t border-geist-accent-200 dark:border-geist-accent-700">
-                      <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Wallet Breakdown</h3>
-                      
-                      {loadingBalances ? (
-                        <div className="flex items-center justify-center py-12">
-                          <div className="text-center">
-                            <svg className="animate-spin h-8 w-8 mx-auto mb-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <p className="text-geist-accent-600 dark:text-geist-accent-300">Loading wallet balances...</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="overflow-hidden bg-white dark:bg-geist-accent-800 border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg">
-                          <table className="min-w-full divide-y divide-geist-accent-200 dark:divide-geist-accent-700">
-                            <thead className="bg-geist-accent-50 dark:bg-geist-accent-700">
-                              <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-300 uppercase tracking-wider">
-                                  Wallet Name
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-300 uppercase tracking-wider">
-                                  Transactions
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-geist-accent-600 dark:text-geist-accent-300 uppercase tracking-wider">
-                                  Balance
-                                </th>
-                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-geist-accent-600 dark:text-geist-accent-300 uppercase tracking-wider">
-                                  Action
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white dark:bg-geist-accent-800 divide-y divide-geist-accent-200 dark:divide-geist-accent-700">
-                              {formData.walletAddresses.filter(addr => addr.length >= 32).map((address, index) => {
-                                // Get wallet transactions
-                                const walletTxs = transactions.filter(tx => tx.sourceWallet === address);
-                                // Get on-chain balance for this wallet
-                                const onChainBalance = walletBalances[address] || 0;
-                                
-                                // Determine wallet status
-                                const isProcessing = walletProcessingStatus.currentWallet === address;
-                                const isQueued = walletProcessingStatus.queuedWallets.includes(address);
-                                const isCompleted = walletProcessingStatus.completedWallets.includes(address);
-                                const isProcessingAll = walletProcessingStatus.processingAll;
-                                
-                                return (
-                                  <tr key={address} className={`${isProcessing ? 'bg-geist-accent-50 dark:bg-geist-accent-700/50' : ''} hover:bg-geist-accent-50 dark:hover:bg-geist-accent-700 cursor-pointer`}>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                      <div className="flex items-center">
-                                        <div className="mr-3">
-                                          {isProcessing && (
-                                            <svg className="animate-spin h-5 w-5 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                          )}
-                                          {isQueued && isProcessingAll && (
-                                            <div className="w-5 h-5 flex items-center justify-center">
-                                              <span className="h-2 w-2 bg-geist-accent-400 dark:bg-geist-accent-500 rounded-full"></span>
-                                            </div>
-                                          )}
-                                          {isCompleted && (
-                                            <svg className="w-5 h-5 text-geist-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <div className="text-sm font-medium text-geist-accent-900 dark:text-geist-foreground">
-                                            {formData.walletNames[formData.walletAddresses.indexOf(address)]}
-                                            {isProcessing && <span className="ml-2 text-xs bg-geist-success text-white px-2 py-0.5 rounded-full">Processing</span>}
-                                            {isQueued && isProcessingAll && <span className="ml-2 text-xs bg-geist-accent-400 dark:bg-geist-accent-600 text-white px-2 py-0.5 rounded-full">Queued</span>}
-                                          </div>
-                                          <div className="text-xs text-geist-accent-500">
-                                            {address.slice(0, 6)}...{address.slice(-4)}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                                      {loadingTransactions && (isProcessing || isQueued) ? (
-                                        <div className="flex items-center">
-                                          {isProcessing ? (
-                                            <svg className="animate-spin h-4 w-4 text-geist-accent-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                          ) : (
-                                            <span className="text-xs text-geist-accent-500 inline-block mr-2">In-Queue</span>
-                                          )}
-                                          {isProcessing ? 'Loading...' : '—'}
-                                        </div>
-                                      ) : walletTxs.length}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-geist-success">
-                                      {onChainBalance.toFixed(4)} SOL
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                                      <button 
-                                        onClick={() => setSelectedWallet(address)}
-                                        className={`px-3 py-1 bg-geist-success text-white rounded-lg hover:bg-opacity-90 text-xs font-medium ${(isQueued && !isCompleted && loadingTransactions) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                        disabled={isQueued && !isCompleted && loadingTransactions}
-                                      >
-                                        {(isQueued && !isCompleted && loadingTransactions) ? 'In-Queue' : 'View'}
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+              )}
+              {activeSection === 'reports' && (
+                /* Tax Reports Section */
+                <div className="mt-6 bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
+                  <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Tax Reports</h2>
                   
-                  {/* Your Crypto Section */}
-                  <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8 mb-8">
-                    <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6 flex items-center justify-between">
-                      <span>Your Crypto</span>
-                      {selectedWallet !== 'all' && (
-                        <span className="text-sm font-normal bg-geist-accent-100 dark:bg-geist-accent-700 px-3 py-1 rounded-lg">
-                          Viewing: {formData.walletNames[formData.walletAddresses.indexOf(selectedWallet)] || 'Selected Wallet'}
-                        </span>
-                      )}
-                    </h2>
-                    
-                    {/* Show different content based on loading state */}
-                    {loadingTransactions && selectedWallet !== 'all' && walletProcessingStatus.currentWallet === selectedWallet && (
-                      <div className="flex items-center justify-center py-16">
-                        <div className="text-center">
-                          <svg className="animate-spin h-10 w-10 mx-auto mb-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">Currently processing this wallet...</p>
-                          <p className="text-sm text-geist-accent-500 mt-2">Transaction data will appear here once processing is complete.</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {loadingTransactions && selectedWallet !== 'all' && walletProcessingStatus.queuedWallets.includes(selectedWallet) && (
-                      <div className="flex items-center justify-center py-16">
-                        <div className="text-center">
-                          <div className="w-10 h-10 mx-auto mb-4 bg-geist-accent-200 dark:bg-geist-accent-700 rounded-full flex items-center justify-center">
-                            <div className="h-3 w-3 bg-geist-accent-400 dark:bg-geist-accent-500 rounded-full"></div>
-                          </div>
-                          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">This wallet is queued for processing</p>
-                          <p className="text-sm text-geist-accent-500 mt-2">
-                            Waiting for {walletProcessingStatus.currentWallet ? 
-                              `${formData.walletNames[formData.walletAddresses.indexOf(walletProcessingStatus.currentWallet)] || 'current wallet'}` : 
-                              'previous wallets'} to complete.
-                      </p>
-                    </div>
-                      </div>
-                    )}
-
-                    {loadingTransactions && selectedWallet !== 'all' && walletProcessingStatus.completedWallets.includes(selectedWallet) && (
-                      <TransactionDashboard 
-                        transactions={transactions.filter(tx => selectedWallet === 'all' || tx.sourceWallet === selectedWallet)} 
-                        selectedWallet={selectedWallet}
-                        walletMap={formData.walletAddresses.reduce((map, address, index) => {
-                          if (address.length >= 32) {
-                            map[address] = formData.walletNames[index];
-                          }
-                          return map;
-                        }, {})}
-                        walletAddresses={formData.walletAddresses.filter(addr => addr.length >= 32)}
-                        walletNames={formData.walletNames.filter((_, index) => formData.walletAddresses[index].length >= 32)}
-                        onWalletSelect={setSelectedWallet}
-                      />
-                    )}
-
-                    {loadingTransactions && selectedWallet !== 'all' && 
-                      walletProcessingStatus.currentWallet !== selectedWallet && 
-                      !walletProcessingStatus.queuedWallets.includes(selectedWallet) &&
-                      !walletProcessingStatus.completedWallets.includes(selectedWallet) && (
-                      <div className="flex items-center justify-center py-16">
-                        <div className="text-center">
-                          <svg className="animate-spin h-10 w-10 mx-auto mb-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">Loading transactions...</p>
-                          <p className="text-sm text-geist-accent-500 mt-2">Transaction data will appear here once loading is complete.</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {loadingTransactions && selectedWallet === 'all' && (
-                      <div className="flex items-center justify-center py-16">
-                        <div className="text-center">
-                          <svg className="animate-spin h-10 w-10 mx-auto mb-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">Loading transactions...</p>
-                          <p className="text-sm text-geist-accent-500 mt-2">
-                            Currently processing: {walletProcessingStatus.currentWallet ? 
-                              formData.walletNames[formData.walletAddresses.indexOf(walletProcessingStatus.currentWallet)] || 'Wallet' : 
-                              'All wallets'}
-                          </p>
-                          <p className="text-sm text-geist-accent-500 mt-1">
-                            {walletProcessingStatus.completedWallets.length > 0 && (
-                              <span>Completed wallets: {walletProcessingStatus.completedWallets.length}</span>
-                            )}
-                            {walletProcessingStatus.queuedWallets.length > 0 && (
-                              <span> • Queued wallets: {walletProcessingStatus.queuedWallets.length}</span>
-                            )}
-                      </p>
-                    </div>
-                      </div>
-                    )}
-                    
-                    {!loadingTransactions && transactions.length > 0 && (
-                      <TransactionDashboard 
-                        transactions={transactions.filter(tx => selectedWallet === 'all' || tx.sourceWallet === selectedWallet)} 
-                        selectedWallet={selectedWallet}
-                        walletMap={formData.walletAddresses.reduce((map, address, index) => {
-                          if (address.length >= 32) {
-                            map[address] = formData.walletNames[index];
-                          }
-                          return map;
-                        }, {})}
-                        walletAddresses={formData.walletAddresses.filter(addr => addr.length >= 32)}
-                        walletNames={formData.walletNames.filter((_, index) => formData.walletAddresses[index].length >= 32)}
-                        onWalletSelect={setSelectedWallet}
-                      />
-                    )}
-                    
-                    {!loadingTransactions && transactions.length === 0 && (
-                      <div className="text-center py-10 border-2 border-dashed border-geist-accent-300 dark:border-geist-accent-600 rounded-xl">
-                        <div className="w-16 h-16 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <svg className="w-8 h-8 text-geist-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <h3 className="text-xl font-medium text-geist-accent-900 dark:text-geist-foreground mb-2">No Transactions Yet</h3>
-                        <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-4 max-w-md mx-auto">
-                          Click "Analyze Transactions" in the Transaction Status section above to load your transaction data.
-                      </p>
-                    </div>
-                    )}
-                  </div>
-
-                  {/* Tax Summary Section */}
-                  <div className="mb-8 bg-white dark:bg-geist-accent-800 rounded-2xl shadow-md border border-geist-accent-200 dark:border-geist-accent-700 p-8">
-                    <h2 className="text-xl font-semibold text-geist-accent-900 dark:text-geist-foreground mb-6">Tax Summary</h2>
-                    
-                    {loadingTransactions ? (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {[1, 2, 3].map((item) => (
-                          <div key={item} className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl flex items-center justify-center">
-                            <svg className="animate-pulse h-6 w-6 text-geist-accent-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <rect width="18" height="4" x="3" y="6" rx="2" fill="currentColor" opacity="0.3" />
-                              <rect width="10" height="4" x="3" y="14" rx="2" fill="currentColor" opacity="0.3" />
-                            </svg>
-                          </div>
-                        ))}
-                      </div>
-                    ) : results ? (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                            ${Math.abs(results.crypto.realizedGains).toFixed(2)}
-                          </div>
-                          <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                            Total {results.crypto.realizedGains >= 0 ? 'Gains' : 'Losses'}
-                  </div>
-                </div>
-
-                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                            ${Math.abs(results.crypto.estimatedTax).toFixed(2)}
-                          </div>
-                          <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                            Estimated Tax
-                          </div>
-                </div>
-
-                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                            ${Math.abs(results.crypto.totalVolume).toFixed(2)}
-                          </div>
-                          <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                            Total Volume
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <div className="w-16 h-16 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <svg className="w-8 h-8 text-geist-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                        </div>
-                        <h3 className="text-xl font-medium text-geist-accent-900 dark:text-geist-foreground mb-2">No Tax Data Yet</h3>
-                        <p className="text-geist-accent-600 dark:text-geist-accent-300 mb-4 max-w-md mx-auto">
-                          Your tax summary will appear here after transaction analysis is complete.
-                        </p>
-                      </div>
-                    )}
-
-                {/* Tax Forms Section */}
-                    {results && (
-                <div className="mt-8 pt-8 border-t border-geist-accent-200 dark:border-geist-accent-700">
-                  <h3 className="text-lg font-medium text-geist-accent-900 dark:text-geist-foreground mb-4">Required Tax Forms</h3>
-                  
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                                <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 8949</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Sales and Other Dispositions of Capital Assets</p>
-                        </div>
-                        <button
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div 
                           onClick={() => generateTaxForm('8949')}
-                                className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
+                      className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5 hover:shadow-md cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium text-geist-accent-900 dark:text-geist-foreground">Form 8949</h3>
+                        <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
                       </div>
-                      <p className="text-xs text-geist-accent-500">Required for reporting your crypto trades</p>
+                      <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                        Sales and Other Dispositions of Capital Assets
+                      </p>
                     </div>
 
-                          <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                                <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Schedule D</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">Capital Gains and Losses</p>
-                        </div>
-                        <button
-                          onClick={() => generateTaxForm('scheduleD')}
-                                className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
+                    <div 
+                      onClick={() => generateTaxForm('schedule-d')}
+                      className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5 hover:shadow-md cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium text-geist-accent-900 dark:text-geist-foreground">Schedule D</h3>
+                        <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
                       </div>
-                      <p className="text-xs text-geist-accent-500">Summary of all capital gains/losses</p>
+                      <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                        Capital Gains and Losses
+                      </p>
                     </div>
 
-                          <div className="border border-geist-accent-200 dark:border-geist-accent-700 rounded-lg p-4 hover:border-geist-accent-400 transition-all duration-300 bg-white dark:bg-geist-accent-800 hover:shadow-lg hover:-translate-y-1 group">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                                <h4 className="font-medium text-geist-accent-800 dark:text-geist-foreground">Form 1040</h4>
-                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">U.S. Individual Income Tax Return</p>
-                        </div>
-                        <button
+                    <div 
                           onClick={() => generateTaxForm('1040')}
-                                className="px-4 py-1 bg-geist-accent-200 dark:bg-geist-accent-700 text-geist-accent-900 dark:text-geist-accent-100 hover:bg-geist-accent-300 dark:hover:bg-geist-accent-600 rounded-lg transition-all duration-300 group-hover:scale-105"
-                        >
-                          Download
-                        </button>
+                      className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5 hover:shadow-md cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium text-geist-accent-900 dark:text-geist-foreground">Form 1040</h3>
+                        <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
                       </div>
-                      <p className="text-xs text-geist-accent-500">Main tax return form</p>
+                      <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                        U.S. Individual Income Tax Return
+                      </p>
+                    </div>
+
+                    <div 
+                      onClick={() => generateTaxForm('schedule-1')}
+                      className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5 hover:shadow-md cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-medium text-geist-accent-900 dark:text-geist-foreground">Schedule 1</h3>
+                        <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </div>
+                      <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                        Additional Income and Adjustments
+                      </p>
                     </div>
                   </div>
 
-                        <div className="mt-4 flex justify-center">
+                  <div className="mt-8">
                     <button
                       onClick={generateAllForms}
-                            className="px-6 py-3 bg-gradient-to-r from-geist-success to-blue-500 hover:from-geist-success hover:to-blue-600 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transform transition-all duration-300 hover:-translate-y-1"
+                      className="px-6 py-3 bg-geist-success text-white rounded-xl font-medium hover:bg-opacity-90 transition-colors flex items-center"
                     >
-                      Download All Forms
+                      <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Generate All Forms
                     </button>
                 </div>
               </div>
             )}
-                  </div>
-                </div>
-          </div>
-            </div>
-          )}
         </div>
+          )}
+        </AppLayout>
       )}
     </div>
   );
