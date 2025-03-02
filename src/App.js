@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 // Add CSS import for animations if not already included in your app
 import './styles/animations.css';
 
 import LandingPage from './components/LandingPage';
 import UserInformationPage from './components/UserInformationPage';
+import { useAuth } from './contexts/AuthContext';
 
 // Add these imports at the top of your file
 import { 
@@ -106,6 +107,28 @@ function WalletInputs({ walletAddresses, onChange }) {
 }
 
 function App() {
+  const { user } = useAuth();
+  
+  // Create refs for functions to break circular dependencies
+  const analyzeTaxesRef = useRef(null);
+  const processNextWalletInQueueRef = useRef(null);
+  
+  // Initialize refs after all functions are defined
+  useEffect(() => {
+    // Use a small timeout to ensure all functions are defined
+    const timer = setTimeout(() => {
+      // At this point, all functions should be defined
+      analyzeTaxesRef.current = analyzeTaxes;
+      
+      // Replace the check with assignment to an empty function as a fallback
+      processNextWalletInQueueRef.current = () => {
+        console.log("processNextWalletInQueue called but not fully initialized");
+      };
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
+  
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -2062,3 +2085,4 @@ const [bypassCache, setBypassCache] = useState(false);
 }
 
 export default App;
+export { DarkModeToggle };

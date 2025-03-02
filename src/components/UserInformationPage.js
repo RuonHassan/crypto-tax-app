@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
+import { formatCurrency } from '../utils/formatters';
+import { addUserWallet } from '../services/databaseService';
 
 const UserInformationPage = ({ 
   formData, 
+  setFormData, 
   handleInputChange, 
   handleWalletNameChange, 
   analyzeTaxes, 
@@ -10,10 +13,11 @@ const UserInformationPage = ({
   results, 
   clearTransactionCache, 
   clearAllTransactionCache,
-  setFormData,
   goBackToDashboard,
   walletProcessingStatus,
-  queueWalletForProcessing
+  queueWalletForProcessing,
+  user,
+  saveWalletAndPull: externalSaveWalletAndPull
 }) => {
   const [walletSaving, setWalletSaving] = useState(false);
   const [incomeSaving, setIncomeSaving] = useState(false);
@@ -57,9 +61,22 @@ const UserInformationPage = ({
     
     // Here we would normally do validation
     const walletAddress = formData.walletAddresses[index];
+    const walletName = formData.walletNames[index];
     
     if (walletAddress.length >= 32) {
       try {
+        // If user is logged in, save wallet to Supabase
+        if (user) {
+          const { success, data: walletData } = await addUserWallet(user.id, {
+            address: walletAddress,
+            name: walletName || `Wallet ${index + 1}`
+          });
+          
+          if (!success) {
+            console.error('Failed to save wallet to database');
+          }
+        }
+        
         // Check if we need to queue this wallet
         if (walletProcessingStatus && walletProcessingStatus.currentWallet) {
           // A wallet is currently being processed, queue this one

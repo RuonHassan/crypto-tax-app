@@ -1,8 +1,11 @@
 import React from 'react';
+import { DarkModeToggle } from '../App';
 
 const LandingPage = ({ onGetStarted }) => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-geist-accent-100 to-white dark:from-geist-background dark:to-geist-accent-800">
+      <DarkModeToggle />
+      
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <nav className="py-6">
           <div className="flex justify-between items-center">
