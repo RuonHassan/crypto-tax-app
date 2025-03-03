@@ -195,3 +195,29 @@ export const calculateGasFees = (transactions) => {
         .filter(tx => tx.type === TRANSACTION_TYPES.GAS)
         .reduce((sum, tx) => sum + Math.abs(tx.solChange), 0);
 };
+
+export const calculateUniqueTokens = (transactions) => {
+    // Extract unique token symbols from transactions
+    const uniqueTokens = new Set();
+    
+    // Always include SOL
+    uniqueTokens.add('SOL');
+    
+    transactions.forEach(tx => {
+        // Add token from token transactions
+        if (tx.tokenInfo && tx.tokenInfo.symbol) {
+            uniqueTokens.add(tx.tokenInfo.symbol);
+        }
+        
+        // Add tokens from accounts that have token metadata
+        if (tx.accounts && Array.isArray(tx.accounts)) {
+            tx.accounts.forEach(account => {
+                if (typeof account === 'object' && account.symbol) {
+                    uniqueTokens.add(account.symbol);
+                }
+            });
+        }
+    });
+    
+    return uniqueTokens.size;
+};

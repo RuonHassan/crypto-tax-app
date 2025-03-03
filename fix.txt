@@ -1,0 +1,11 @@
+        const results = {
+          crypto: {
+            totalTransactions: nonGasTransactions.length,
+            uniqueTokens: calculateUniqueTokens(nonGasTransactions),
+            totalVolume: calculateVolume(nonGasTransactions),
+            realizedGains: nonGasTransactions.reduce((sum, tx) => sum + (tx.realizedGain || 0), 0),
+            estimatedTax: nonGasTransactions.reduce((sum, tx) => sum + ((tx.realizedGain || 0) * 0.30),
+            gasFees: calculateGasFees(processedTransactions),
+            internalTransfers: processedTransactions.filter(tx => tx.isInternalTransfer).length,
+          },
+          traditional: {

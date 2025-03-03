@@ -13,7 +13,6 @@ import {
   categorizeTransaction, 
   calculateVolume, 
   calculateGasFees,
-  calculateUniqueTokens,
   groupTransactions 
 } from './utils/transactionUtils';
 
@@ -878,9 +877,9 @@ function App({ user }) {
             uniqueTokens: calculateUniqueTokens(nonGasTransactions),
             totalVolume: calculateVolume(nonGasTransactions),
             realizedGains: nonGasTransactions.reduce((sum, tx) => sum + (tx.realizedGain || 0), 0),
-            estimatedTax: nonGasTransactions.reduce((sum, tx) => sum + ((tx.realizedGain || 0) * 0.30), 0),
+            estimatedTax: nonGasTransactions.reduce((sum, tx) => sum + ((tx.realizedGain || 0) * 0.30),
             gasFees: calculateGasFees(processedTransactions),
-            internalTransfers: processedTransactions.filter(tx => tx.isInternalTransfer).length,
+            internalTransfers: processedTransactions.filter(tx => tx.isInternalTransfer).length
           },
           traditional: {
             totalIncome: Number(formData.salary) || 0,

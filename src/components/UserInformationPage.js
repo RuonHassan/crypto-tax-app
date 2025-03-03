@@ -17,7 +17,8 @@ const UserInformationPage = ({
   walletProcessingStatus,
   queueWalletForProcessing,
   user,
-  saveWalletAndPull: externalSaveWalletAndPull
+  saveWalletAndPull: externalSaveWalletAndPull,
+  saveTransactionsToSupabase
 }) => {
   const [walletSaving, setWalletSaving] = useState(false);
   const [incomeSaving, setIncomeSaving] = useState(false);
@@ -83,7 +84,13 @@ const UserInformationPage = ({
           queueWalletForProcessing(walletAddress);
         } else {
           // No wallet is being processed, process this one immediately
-          await analyzeTaxes(walletAddress);
+          const result = await analyzeTaxes(walletAddress);
+          
+          // If saveTransactionsToSupabase is provided and we have user info,
+          // save the transactions to Supabase
+          if (user && saveTransactionsToSupabase && window.transactions && window.transactions.length > 0) {
+            saveTransactionsToSupabase(walletAddress, window.transactions);
+          }
         }
       } catch (error) {
         console.error('Error analyzing wallet:', error);
