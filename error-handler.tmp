@@ -1,0 +1,1 @@
+if (error.message?.includes('429')) {console.log('Rate limit hit during signature fetch, waiting longer...'); await sleep(RATE_LIMIT.WALLET_DELAY * 2); continue;}

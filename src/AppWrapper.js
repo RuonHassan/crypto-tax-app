@@ -34,18 +34,14 @@ const AppWrapper = () => {
 
   return (
     <Routes>
-      {/* Landing page as the default route */}
+      {/* If authenticated, always redirect to app; otherwise show the landing page */}
       <Route 
         path="/" 
         element={
           user ? (
             <Navigate to="/app" />
           ) : (
-            showLanding ? (
-              <LandingPage onGetStarted={handleGetStarted} />
-            ) : (
-              <Navigate to="/login" />
-            )
+            <LandingPage onGetStarted={handleGetStarted} />
           )
         } 
       />

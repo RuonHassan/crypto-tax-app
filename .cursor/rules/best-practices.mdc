@@ -1,4 +1,5 @@
 ---
-description: Best Practices
+description: Best Practice
 globs: 
+alwaysApply: false
 ---

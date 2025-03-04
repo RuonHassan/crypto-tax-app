@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 // Add CSS import for animations if not already included in your app
 import './styles/animations.css';
+import './App.css';
 
 import LandingPage from './components/LandingPage';
 import UserInformationPage from './components/UserInformationPage';
@@ -29,10 +30,29 @@ import { getUserWallets, saveTransactions } from './services/databaseService';
 
 import throttledQueue from 'throttled-queue';
 
+import tokenRegistryService from './services/tokenRegistryService';
+
+// At the top of the file with the other imports, add:
+import { getConnection, validateWalletAddress, resetConnection, executeWithRetry, checkHeliusHealth } from './services/solanaConnectionService';
+
 const CACHE_KEY_PREFIX = 'solana_tx_';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
 const SOLANA_RPC_ENDPOINT = 'https://rpc.helius.xyz/?api-key=268519a5-accf-40b1-9fe3-d0d61fe3a5ce';
+// Extract the API key for direct use with their API endpoints
+const HELIUS_API_KEY = '268519a5-accf-40b1-9fe3-d0d61fe3a5ce';
+
+// Updated endpoints for Helius - use v0 for transactions
+const HELIUS_RPC_URL = `https://api.helius.xyz/v1/rpc?api-key=${HELIUS_API_KEY}`;
+const HELIUS_TRANSACTION_URL = `https://api.helius.xyz/v0/transactions?api-key=${HELIUS_API_KEY}`;
+// Also add this endpoint for direct wallet transaction history - use a format that doesn't need replacement
+const HELIUS_WALLET_TRANSACTIONS_URL = `https://api.helius.xyz/v0/addresses/`;
+
+// Make the endpoint available globally for the connection service
+window.SOLANA_RPC_ENDPOINT = SOLANA_RPC_ENDPOINT;
+
+// Debug mode - set to true to enable additional logging
+const DEBUG_MODE = true;
 
 const RATE_LIMIT = {
   WALLET_DELAY: 3000,      // Increased from 2000ms to 3000ms
@@ -131,13 +151,14 @@ function App({ user }) {
     realEstateIncome: '',
     dividends: ''
   });
-  
+
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(''); // Add this state for tracking processing steps
   const [results, setResults] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showLandingPage, setShowLandingPage] = useState(!user); // Initialize based on authentication status
-  const [bypassCache, setBypassCache] = useState(false);
+const [bypassCache, setBypassCache] = useState(false);
   const [rateLimitInfo, setRateLimitInfo] = useState({
     isLimited: false,
     retryCount: 0,
@@ -180,6 +201,87 @@ function App({ user }) {
     // Use a small timeout to ensure all functions are defined
     const timer = setTimeout(() => {
       // At this point, all functions should be defined
+      
+      // Define the real queueWalletForProcessing function
+      queueWalletForProcessingRef.current = (walletAddress) => {
+        if (!walletAddress) {
+          console.error("Cannot process empty wallet address");
+          return Promise.resolve();
+        }
+        
+        // Use the improved wallet validation from solanaConnectionService
+        if (!validateWalletAddress(walletAddress)) {
+          console.error(`Invalid Solana wallet address: ${walletAddress}`);
+          return Promise.resolve();
+        }
+        
+        console.log(`Queueing wallet for processing: ${walletAddress}`);
+        
+        try {
+          // Don't add if it's already in the queue or currently processing
+          if (walletProcessingStatus.currentWallet === walletAddress) {
+            console.log(`Wallet ${walletAddress} is already being processed`);
+            return Promise.resolve();
+          }
+          
+          if (walletProcessingStatus.queuedWallets.includes(walletAddress)) {
+            console.log(`Wallet ${walletAddress} is already queued for processing`);
+            return Promise.resolve();
+          }
+          
+          // Clear any existing wallet-specific data to ensure a fresh load
+          setTransactions([]);
+          
+          // Switch to wallet display view
+          setActiveSection('transactions');
+          
+          // Select this wallet for display
+          setSelectedWallet(walletAddress);
+          
+          // Update wallet processing status
+          setWalletProcessingStatus(prev => {
+            // If already processing this wallet, don't change anything
+            if (prev.currentWallet === walletAddress) {
+              return prev;
+            }
+            
+            // If already in queue, don't add again
+            if (prev.queuedWallets.includes(walletAddress)) {
+              return prev;
+            }
+            
+            // If no current wallet, set this as current
+            if (!prev.currentWallet) {
+              // Start processing immediately
+              console.log(`Starting immediate processing of wallet: ${walletAddress}`);
+              setTimeout(() => {
+                analyzeTaxes(walletAddress);
+              }, 100);
+              
+              return {
+                ...prev,
+                currentWallet: walletAddress,
+                completedWallets: prev.completedWallets.filter(addr => addr !== walletAddress)
+              };
+            }
+            
+            // Otherwise add to queue
+            console.log(`Adding ${walletAddress} to processing queue`);
+            return {
+              ...prev,
+              queuedWallets: [...prev.queuedWallets, walletAddress],
+              completedWallets: prev.completedWallets.filter(addr => addr !== walletAddress)
+            };
+          });
+          
+          return Promise.resolve();
+        } catch (error) {
+          console.error(`Error queueing wallet ${walletAddress}:`, error);
+          return Promise.resolve();
+        }
+      };
+      
+      // At this point, all functions should be defined
       // Implement the real functions first
       const realAnalyzeTaxes = async (specificWalletAddress = null) => {
         console.log('Starting tax analysis for', specificWalletAddress || 'all wallets');
@@ -188,6 +290,14 @@ function App({ user }) {
         setLoading(true);
         setLoadingProgress(0);
         
+        // Check connection status before proceeding
+        const connectionIsHealthy = await checkConnectionStatus();
+        if (!connectionIsHealthy) {
+          console.error("Cannot proceed with tax analysis due to connection issues");
+          setLoading(false);
+      return;
+    }
+    
         try {
           // Clear existing transactions if this is processing all wallets
           let allTransactions = [];
@@ -350,14 +460,14 @@ function App({ user }) {
                 tempTxs.sort((a, b) => a.timestamp - b.timestamp);
                 
                 // Import and use groupTransactions from transactionUtils
-                const { transactions: groupedTxs, gasFees } = groupTransactions(tempTxs);
+                const { transactions: groupedTxs, gasFees } = await groupTransactions(tempTxs);
                 setTransactions(groupedTxs);
                 
                 // Save transactions to Supabase if user is logged in
                 if (authUser && taggedTransactions.length > 0) {
                   try {
                     await saveTransactionsToSupabase(walletAddress, taggedTransactions);
-                  } catch (error) {
+      } catch (error) {
                     console.error("Error saving transactions to Supabase:", error);
                   }
                 }
@@ -413,7 +523,7 @@ function App({ user }) {
             allTransactions.sort((a, b) => a.timestamp - b.timestamp);
             
             // Group related transactions (internal transfers, swaps, etc.)
-            const { transactions: groupedTxs, gasFees } = groupTransactions(allTransactions);
+            const { transactions: groupedTxs, gasFees } = await groupTransactions(allTransactions);
             
             // Process transactions for tax calculations
             const processedTransactions = groupedTxs.map(tx => {
@@ -549,75 +659,9 @@ function App({ user }) {
         }
       };
       
-      // Implement the real queueWalletForProcessing function
-      const realQueueWalletForProcessing = (walletAddress) => {
-        console.log('Queueing wallet for processing:', walletAddress);
-        
-        if (!walletAddress || walletAddress.length < 32) {
-          console.log('Invalid wallet address');
-          return false;
-        }
-        
-        // Add to queue
-        setWalletProcessingStatus(prevStatus => {
-          console.log('Current wallet status before queueing:', 
-            { current: prevStatus.currentWallet, queued: prevStatus.queuedWallets, completed: prevStatus.completedWallets });
-          
-          // Don't add if already in queue or currently processing
-          if (prevStatus.queuedWallets.includes(walletAddress)) {
-            console.log('Wallet already in queue, not adding again:', walletAddress);
-            return prevStatus;
-          } 
-          
-          if (prevStatus.currentWallet === walletAddress) {
-            console.log('Wallet is currently processing, not adding to queue:', walletAddress);
-            return prevStatus;
-          }
-          
-          if (prevStatus.completedWallets.includes(walletAddress)) {
-            console.log('Wallet already completed, not adding to queue:', walletAddress);
-            return prevStatus;
-          }
-          
-          // Check if this is the first wallet (nothing currently processing)
-          const isFirstWallet = !prevStatus.currentWallet && (!prevStatus.queuedWallets || prevStatus.queuedWallets.length === 0);
-          console.log('Is first wallet?', isFirstWallet);
-          
-          // If this is the first wallet, start processing immediately
-          if (isFirstWallet) {
-            console.log('Starting first wallet immediately:', walletAddress);
-            
-            // For the first wallet, set it as both queued and current
-            const newStatus = {
-              ...prevStatus,
-              currentWallet: walletAddress,
-              queuedWallets: [walletAddress]
-            };
-            
-            // Schedule processing after state update is complete
-            setTimeout(() => {
-              console.log('Starting to process first wallet:', walletAddress);
-              analyzeTaxes(walletAddress);
-            }, 500);
-            
-            return newStatus;
-          } else {
-            // For subsequent wallets, just add to queue
-            console.log('Adding wallet to existing queue:', walletAddress);
-            return {
-              ...prevStatus,
-              queuedWallets: [...(prevStatus.queuedWallets || []), walletAddress]
-            };
-          }
-        });
-        
-        return true;
-      };
-      
       // Now assign our implementations to the refs
       analyzeTaxesRef.current = realAnalyzeTaxes;
       processNextWalletInQueueRef.current = realProcessNextWalletInQueue;
-      queueWalletForProcessingRef.current = realQueueWalletForProcessing;
     }, 100);
     
     return () => clearTimeout(timer);
@@ -752,6 +796,48 @@ function App({ user }) {
     setLoadingProgress(0);
   };
 
+  // Function to reset all application data (for testing)
+  const resetAllAppData = async () => {
+    console.log('Resetting all application data...');
+    
+    // Clear local cache
+    clearAllTransactionCache();
+    
+    // Reset UI state
+    setTransactions([]);
+    setResults(null);
+    setLoadingProgress(0);
+    setBatchProgress({
+      totalTransactions: 0,
+      processedTransactions: 0,
+      currentBatch: 0,
+      totalBatches: 0,
+      isComplete: true
+    });
+    
+    // Clear Supabase data if user is logged in
+    if (authUser) {
+      try {
+        // Import the function from databaseService
+        const { deleteAllUserData } = await import('./services/databaseService');
+        
+        // Delete all user data from Supabase
+        const result = await deleteAllUserData(authUser.id);
+        
+        if (result.success) {
+          console.log('Successfully reset all Supabase data');
+                      } else {
+          console.error('Error resetting Supabase data:', result.error);
+        }
+      } catch (error) {
+        console.error('Error importing or calling deleteAllUserData:', error);
+      }
+    }
+    
+    // Show confirmation to user
+    alert('All application data has been reset successfully.');
+  };
+
   const clearTransactionCache = () => {
     // Only clear cache for valid wallet addresses
     const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
@@ -799,823 +885,363 @@ function App({ user }) {
     }));
   };
 
-  const fetchWithRetry = async (fn, maxRetries = RATE_LIMIT.MAX_RETRIES, initialDelay = RATE_LIMIT.INITIAL_BACKOFF) => {
+  // Enhanced fetchWithRetry function to better handle rate limits
+  const fetchWithRetry = async (fn, maxRetries = 5, initialDelay = 1000) => {
     let retries = 0;
-    let delay = initialDelay;
+    let lastError = null;
+    let retryDelay = initialDelay;
     
-    // Add jitter to avoid thundering herd problem
-    const getBackoffDelay = (baseDelay) => {
-      // Add randomness of +/- 25% to the delay
-      const jitter = baseDelay * (0.75 + Math.random() * 0.5);
-      return Math.floor(jitter);
+    const isHeliusApiError = (error) => {
+      if (!error) return false;
+      const msg = error.message || '';
+      return msg.includes('Method not found') || 
+             msg.includes('Helius API') || 
+             (error.heliusError === true);
     };
-
-    while (true) {
+    
+    console.log(`Making RPC call with retry logic`);
+    
+    while (retries <= maxRetries) {
       try {
-        // Wrap the function with throttling
-        return await rpcThrottler(fn);
+        return await fn();
       } catch (error) {
-        // Check for rate limit errors
-        const isRateLimited = error.message?.includes('429') || 
-                             error.message?.toLowerCase().includes('too many requests') ||
-                             error.message?.toLowerCase().includes('rate limit') ||
-                             error.message?.toLowerCase().includes('timeout');
-                             
-        retries++;
+        lastError = error;
         
-        // If we've exhausted retries or it's not a rate limit issue, throw the error
-        if (retries > maxRetries || !isRateLimited) {
-          console.error(`Request failed after ${retries} retries:`, error.message);
+        const errorMessage = error.message || '';
+        const responseText = error.responseText || '';
+        
+        // Mark this error as a Helius API error for future detection
+        if (errorMessage.includes('Method not found') || responseText.includes('Method not found')) {
+          error.heliusError = true;
+        }
+        
+        // Special case for Helius API errors - don't retry the same method call
+        if (isHeliusApiError(error)) {
+          console.error(`Helius API error detected, not retrying with same method: ${errorMessage}`);
+          throw error; // Don't retry Helius API method errors
+        }
+        
+        const isRateLimited = 
+          errorMessage.includes('429') || 
+          errorMessage.includes('rate limit') || 
+          errorMessage.includes('too many requests');
+          
+        const isNetworkError = 
+          errorMessage.includes('network') || 
+          errorMessage.includes('ECONNRESET') || 
+          errorMessage.includes('ETIMEDOUT') || 
+          errorMessage.includes('failed to fetch');
+        
+        if (retries === maxRetries) {
+          console.error(`Max retries (${maxRetries}) reached. Last error: ${errorMessage}`);
           throw error;
         }
         
-        // Calculate backoff with exponential increase and jitter
-        delay = getBackoffDelay(initialDelay * Math.pow(2, retries - 1));
+        if (isRateLimited) {
+          console.warn(`Rate limit hit (retry ${retries + 1}/${maxRetries}). Waiting ${retryDelay}ms before retrying...`);
+          
+          // Update the UI with rate limit info
+          setRateLimitInfo({
+            isRateLimited: true,
+            message: `Rate limit reached. Retrying in ${Math.ceil(retryDelay/1000)}s...`,
+            nextRetryTime: new Date(Date.now() + retryDelay)
+          });
+        } else if (isNetworkError) {
+          console.warn(`Network error (retry ${retries + 1}/${maxRetries}): ${errorMessage}. Waiting ${retryDelay}ms before retrying...`);
+        } else {
+          console.warn(`Error (retry ${retries + 1}/${maxRetries}): ${errorMessage}. Waiting ${retryDelay}ms before retrying...`);
+        }
         
-        // Update rate limit info for UI feedback
-        setRateLimitInfo(prev => ({
-          isLimited: true,
-          retryCount: retries,
-          nextRetryTime: Date.now() + delay,
-          message: `Rate limited. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`,
-          totalDelays: (prev.totalDelays || 0) + 1
-        }));
-        
-        console.log(`Server responded with 429. Retrying after ${delay}ms delay...`);
-        await sleep(delay);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        retryDelay *= 2; // Exponential backoff
+        retries++;
       }
     }
+    
+    // We should never get here due to the final throw in the catch block
+    throw lastError || new Error('Max retries reached');
   };
 
-  const fetchSolanaTransactions = async (walletAddress, specificWalletAddress = null) => {
-    console.log(`Starting transaction fetch for wallet: ${walletAddress}, specific wallet: ${specificWalletAddress || 'none'}`);
+  // Inside fetchSolanaTransactions, modify to try the direct approach first
+  const fetchSolanaTransactions = async (walletAddress) => {
+    console.log(`Fetching Solana transactions for wallet: ${walletAddress}`);
     
-    // If specificWalletAddress isn't provided, use walletAddress
-    if (specificWalletAddress === null) {
-      specificWalletAddress = walletAddress;
+    // Validate wallet address first
+    if (!validateWalletAddress(walletAddress)) {
+      console.error(`Invalid wallet address format: ${walletAddress}`);
+      return [];
     }
     
-    if (!walletAddress || walletAddress.length < 32) {
-      throw new Error('Invalid wallet address format');
-    }
-
+    // Debug mode checks...
+    // ...existing debug mode code...
+    
+    // Reset batch progress
+    setBatchProgress({
+      currentBatch: 0,
+      totalBatches: 0,
+      batchSize: 0,
+      processedInBatch: 0,
+      totalTransactions: 0,
+      processedTransactions: 0,
+      isComplete: false
+    });
+    
+    setLoading(true);
+    setLoadingStep('Fetching transactions...');
+    
     // Check cache first
-    const cacheKey = `${walletAddress}_${getFiscalYearDates().startDate.getTime()}`;
+    const cacheKey = `${CACHE_KEY_PREFIX}${walletAddress}_${getFiscalYearDates().startDate.getTime()}`;
     const cachedData = getFromCache(cacheKey);
+    
     if (cachedData) {
-      console.log('Found cached transactions');
+      console.log(`Found ${cachedData.length} cached transactions for ${walletAddress}`);
+      setLoading(false);
+      setLoadingStep('');
       return cachedData;
     }
-
+    
+    // Approach 1: Try using the direct wallet transactions endpoint first (simplest)
     try {
-      const connection = new Connection(SOLANA_RPC_ENDPOINT, {
-        commitment: 'confirmed',
-        confirmTransactionInitialTimeout: 60000,
-        httpHeaders: {
-          'Cache-Control': 'max-age=3600',
-          'Retry-After': '5'
-        }
-      });
+      console.log(`Trying direct wallet transactions approach for ${walletAddress}...`);
       
-      const publicKey = new PublicKey(walletAddress);
-      const { startDate, endDate } = getFiscalYearDates();
-      const startTime = startDate.getTime() / 1000;
-      const endTime = endDate.getTime() / 1000;
-
-      // Further optimized batch settings
-      const BATCH_SIZE = 40;           // Reduced to avoid rate limits
-      const PARALLEL_BATCHES = 2;      // Reduced to avoid rate limits
-      const SIGNATURE_BATCH_SIZE = 50; // Reduced to avoid rate limits
+      const directTransactions = await fetchWalletTransactionsFromHelius(walletAddress, 100);
       
-      // More conservative batch settings to avoid rate limits
-      const SIGNATURE_BATCH_SIZE = 50;  // Reduced from 100 to 50
-      const PARALLEL_BATCHES = 2;       // Reduced from 3 to 2 (matches RATE_LIMIT.CONCURRENT_REQUESTS)
-      const CHUNK_SIZE = 40;            // Reduced from 75 to 40
-      
-      let allTransactions = [];
-      let before = undefined;
-      let hasMore = true;
-      let totalSignatures = [];
-
-      // First phase: Get all signatures with smart rate limiting
-      console.log('Phase 1: Fetching transaction signatures...');
-      let signatureBatchCounter = 0;
-      
-      while (hasMore) {
-        try {
-          signatureBatchCounter++;
-          const signatures = await fetchWithRetry(async () => {
-            return await connection.getSignaturesForAddress(
-              publicKey,
-              { before, limit: SIGNATURE_BATCH_SIZE }
-            );
-          });
-
-          if (!signatures || signatures.length === 0) {
-            hasMore = false;
-            continue;
-          }
-
-          // Filter signatures by date range - do this immediately to reduce memory usage
-          const validSignatures = signatures.filter(sig => 
-            sig.blockTime && sig.blockTime >= startTime && sig.blockTime <= endTime
-          );
-
-          if (validSignatures.length === 0) {
-            if (signatures[signatures.length - 1].blockTime < startTime) {
-              hasMore = false;
-              continue;
-            }
-          }
-
-          totalSignatures.push(...validSignatures);
-          before = signatures[signatures.length - 1].signature;
-
-          // More granular progress updates
-          setLoadingProgress(Math.min((totalSignatures.length / 1000) * 50, 49));
-          
-          // Adaptive rate limiting based on batch count to avoid hitting rate limits
-          const currentDelay = signatureBatchCounter % 5 === 0 
-            ? RATE_LIMIT.REQUEST_DELAY * 2  // Every 5th batch, wait a bit longer
-            : RATE_LIMIT.REQUEST_DELAY;
-            
-          await sleep(currentDelay);
-        } catch (error) {
-          if (error.message?.includes('429')) {
-            console.log('Rate limit hit during signature fetch, waiting...');
-            await sleep(RATE_LIMIT.WALLET_DELAY);
-            continue;
-          }
-          throw error;
-        }
-      }
-
-      console.log(`Found ${totalSignatures.length} transactions in date range`);
-
-      // Second phase: Process transactions in optimized parallel batches
-      console.log('Phase 2: Processing transaction details...');
-      const processedTxs = [];
-      
-      // Pre-sort signatures by timestamp to process most recent first (often more relevant)
-      totalSignatures.sort((a, b) => b.blockTime - a.blockTime);
-      
-      // Process in chunks to avoid memory issues with large transaction counts
-      const chunkSize = 75; // Increase chunk size for better throughput
-      
-      for (let i = 0; i < totalSignatures.length; i += chunkSize) {
-        const chunk = totalSignatures.slice(i, i + chunkSize);
-        console.log(`Processing chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(totalSignatures.length/chunkSize)}`);
+      if (directTransactions && directTransactions.length > 0) {
+        console.log(`Successfully fetched ${directTransactions.length} transactions via direct endpoint`);
         
-        // Process the current chunk in parallel batches
-        for (let j = 0; j < chunk.length; j += PARALLEL_BATCHES) {
-          const batchPromises = [];
-          
-          // Create a batch of promises
-          for (let k = 0; k < PARALLEL_BATCHES && j + k < chunk.length; k++) {
-            const idx = j + k;
-            const sig = chunk[idx];
+        // Process the transactions
+        setLoading(false);
+        setLoadingStep('');
+        
+        // Save to cache
+        saveToCache(cacheKey, directTransactions);
+        
+        // Update batch progress to show completion
+        setBatchProgress(prev => ({
+          ...prev,
+          isComplete: true,
+          totalTransactions: directTransactions.length,
+          processedTransactions: directTransactions.length
+        }));
+        
+        return directTransactions;
+      } else {
+        console.warn(`No transactions found via direct wallet endpoint for ${walletAddress}, trying signature-based approach...`);
+        // Continue to approach 2
+      }
+    } catch (directError) {
+      console.error(`Direct wallet transactions approach failed:`, directError.message);
+      console.log(`Falling back to signature-based approach...`);
+      // Continue to approach 2
+    }
+    
+    // Approach 2: Fetch transaction signatures and then individual transactions
+    try {
+      console.log(`Using signature-based approach for ${walletAddress}`);
+      
+      // Reset connection to ensure we're not using a stale connection
+      resetConnection();
+      
+      // Get a fresh connection
+      const connection = getConnection(true);
+      
+      // Constants for batching
+      const SIGNATURE_BATCH_SIZE = 50;  // Number of signatures to fetch at once
+      const DISPLAY_BATCH_SIZE = 10;    // Number of transactions to process and display at once
+      const MAX_TRANSACTIONS = 5000;    // Maximum number of transactions to process
+      
+      let beforeSignature = null;
+      let allTransactions = [];
+      let batchNumber = 1;
+      let fetchingComplete = false;
+      let processedSignatures = new Set(); // Track which signatures we've processed
+      
+      // Process and display transactions in smaller batches
+      const processAndDisplayBatch = async (signatures, batchNumber) => {
+        if (!signatures || signatures.length === 0) return [];
+        
+        console.log(`Processing display batch ${batchNumber} with ${signatures.length} signatures`);
+        
+        // Update loading status
+        setLoadingStep(`Processing batch ${batchNumber} with ${signatures.length} transactions...`);
+        
+        // Update batch progress
+        setBatchProgress(prev => ({
+          ...prev,
+          currentBatch: batchNumber,
+          batchSize: signatures.length,
+          processedInBatch: 0
+        }));
+        
+        // Fetch transactions for all signatures in parallel
+        const transactionPromises = signatures.map((sig, index) => {
+          return fetchWithRetry(async () => {
+            if (processedSignatures.has(sig.signature)) {
+              console.log(`Skipping already processed signature: ${sig.signature.substring(0, 8)}...`);
+              return null;
+            }
             
-            batchPromises.push(
-              (async () => {
+            processedSignatures.add(sig.signature);
+            
+            try {
+              console.log(`Fetching transaction ${sig.signature.substring(0, 8)}...`);
+              
+              let tx = null;
+              let txData = null;
+              
+              try {
+                // First try Helius enhanced transactions API
+                const txResponse = await fetch(HELIUS_TRANSACTION_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    transactions: [sig.signature] 
+                  })
+                });
+                
+                if (!txResponse.ok) {
+                  const errorText = await txResponse.text();
+                  console.error(`Transaction fetch error response:`, errorText);
+                  throw new Error(`Failed to fetch transaction: ${txResponse.status} ${txResponse.statusText} - ${errorText}`);
+                }
+                
+                txData = await txResponse.json();
+                
+                if (!txData || !txData[0]) {
+                  console.warn(`Transaction ${sig.signature.substring(0, 8)}... not found or invalid response`, JSON.stringify(txData));
+                  throw new Error('Empty or invalid response from Helius transactions API');
+                }
+                
+                tx = txData[0];
+              } catch (heliusError) {
+                // Fallback to direct Solana web3.js API
+                console.warn(`Helius transactions API failed, falling back to direct connection: ${heliusError.message}`);
+                
                 try {
-                  // Use pre-fetch caching to improve performance
-                  const cacheSubKey = `tx_${sig.signature}`;
-                  const cachedTx = getFromCache(cacheSubKey);
+                  // Get a fresh connection
+                  resetConnection();
+                  const connection = getConnection(true);
                   
-                  if (cachedTx) {
-                    return cachedTx;
-                  }
-                  
-                  const tx = await fetchWithRetry(async () => {
-                    return await connection.getTransaction(sig.signature, {
-                      maxSupportedTransactionVersion: 0
-                    });
+                  // Fetch the transaction directly using the Solana web3.js API
+                  const txResponse = await connection.getTransaction(sig.signature, {
+                    maxSupportedTransactionVersion: 0,
+                    commitment: 'confirmed'
                   });
                   
-                  if (!tx || !tx.transaction || !tx.meta) return null;
-                  
-                  const accountKeys = tx.transaction.message.accountKeys || [];
-                  const walletIndexes = accountKeys
-                    .map((key, index) => ({ key: key?.toString() || '', index }))
-                    .filter(({ key }) => key === walletAddress);
-                  
-                  if (!walletIndexes.length) return null;
-                  
-                  let txSolChange = 0;
-                  walletIndexes.forEach(({ index }) => {
-                    const preBalance = tx.meta.preBalances?.[index] ?? 0;
-                    const postBalance = tx.meta.postBalances?.[index] ?? 0;
-                    const change = (postBalance - preBalance) / LAMPORTS_PER_SOL;
-                    
-                    if (tx.transaction.message.isAccountWritable?.(index)) {
-                      txSolChange += change;
-                    }
-                  });
-                  
-                  if (Math.abs(txSolChange) > 0.000001) {
-                    // Fetch prices in parallel
-                    const [currentPrice, acquirePrice] = await Promise.all([
-                      priceService.getPriceAtTimestamp(tx.blockTime),
-                      priceService.getPriceAtTimestamp(tx.blockTime - (Math.random() * 365 * 24 * 60 * 60))
-                    ]);
-                    
-                    // Extract program IDs for token identification - more efficiently
-                    const programIds = new Set(); // Use a Set for deduplication
-                    try {
-                      tx.transaction.message.instructions.forEach(instruction => {
-                        if (instruction.programIdIndex !== undefined) {
-                          const programId = accountKeys[instruction.programIdIndex]?.toString();
-                          if (programId) {
-                            programIds.add(programId);
-                          }
-                        }
-                      });
-                    } catch (e) {
-                      // Skip if we can't extract program IDs
-                    }
-                    
-                    const programIdsArray = Array.from(programIds);
-                    
-                    // More efficient DEX checking
-                    const DEX_PROGRAM_IDS = {
-                      'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB': 'Jupiter',
-                      '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP': 'Orca',
-                      'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX': 'Serum',
-                      'RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr': 'Raydium',
-                      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium AMM',
-                      'JPPooLEqRb2LuVYJx6mjSfJA7YWcqQz2iCfBdz7k9Cn': 'Jupiter Perps',
-                      'M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K': 'Meteora'
-                    };
-                    
-                    // Check if any program ID is a DEX - more efficient
-                    const isDexTransaction = programIdsArray.some(id => DEX_PROGRAM_IDS[id]);
-                    
-                    // Find the DEX program ID if it exists
-                    const dexProgramId = programIdsArray.find(id => DEX_PROGRAM_IDS[id]);
-                    
-                    // Known token accounts - expanded list
-                    const knownTokens = {
-                      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-                      'So11111111111111111111111111111111111111112': 'SOL',
-                      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
-                      'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL',
-                      'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'BONK',
-                      '7i5KKsX2weiTkry7jA4ZwSuXGhs5eJBEjY8vVxR4pfRx': 'JUNGLE',
-                      'kinXdEcpDQeHPEuQnqmUgtYykqKGVFq6CeVX5iAHJq6': 'KIN'
-                    };
-                    
-                    // More efficient token account detection
-                    const transactionTokens = [];
-                    const accountSet = new Set(accountKeys.map(key => key?.toString()).filter(Boolean));
-                    
-                    for (const [mint, symbol] of Object.entries(knownTokens)) {
-                      if (accountSet.has(mint)) {
-                        transactionTokens.push({
-                          mint,
-                          symbol,
-                          name: symbol
-                        });
-                      }
-                    }
-                    
-                    // Determine transaction type (using proper constants from transactionUtils)
-                    let txType = TRANSACTION_TYPES.TRANSFER;
-                    let tokenAction = null;
-                    let perpsInfo = null;
-                    
-                    if (Math.abs(txSolChange) < 0.001) {
-                      txType = TRANSACTION_TYPES.GAS;
-                    } else if (programIdsArray.includes('JPPooLEqRb2LuVYJx6mjSfJA7YWcqQz2iCfBdz7k9Cn')) {
-                      // Jupiter Perps transaction detection
-                      const isLiquidation = tx.meta?.logMessages?.some(log => 
-                        log.toLowerCase().includes('liquidat'));
-                      
-                      const isClosePosition = tx.meta?.logMessages?.some(log => 
-                        log.toLowerCase().includes('close') || log.toLowerCase().includes('settle'));
-                      
-                      // Try to extract perps market information
-                      const marketInfo = tx.meta?.logMessages?.find(log => 
-                        log.includes('market') && log.includes('perpetual'))?.match(/market:([^,]+)/)?.[1] || 'Unknown';
-                      
-                      if (isLiquidation) {
-                        txType = TRANSACTION_TYPES.PERPS_LIQUIDATED;
-                        perpsInfo = { 
-                          market: marketInfo,
-                          type: 'liquidation'
-                        };
-                      } else if (isClosePosition) {
-                        txType = TRANSACTION_TYPES.PERPS_CLOSE;
-                        perpsInfo = { 
-                          market: marketInfo,
-                          type: 'close'
-                        };
-                      } else {
-                        // Try to detect if it's a long or short
-                        const isLong = tx.meta?.logMessages?.some(log => 
-                          log.toLowerCase().includes('long'));
-                        
-                        const isShort = tx.meta?.logMessages?.some(log => 
-                          log.toLowerCase().includes('short'));
-                        
-                        txType = TRANSACTION_TYPES.PERPS_ORDER;
-                        perpsInfo = { 
-                          market: marketInfo,
-                          type: isLong ? 'long' : (isShort ? 'short' : 'unknown')
-                        };
-                      }
-                    } else if (isDexTransaction) {
-                      // Token buy/sell transactions
-                      if (transactionTokens.length > 0) {
-                        // Determine if it's a buy or sell based on SOL change
-                        if (txSolChange < 0) {
-                          txType = TRANSACTION_TYPES.BUY;
-                          tokenAction = "Buy";
-                        } else {
-                          txType = TRANSACTION_TYPES.SELL;
-                          tokenAction = "Sell";
-                        }
-                      } else {
-                        // Generic swap if we can't determine the token
-                        txType = TRANSACTION_TYPES.SWAP;
-                      }
-                    }
-                    
-                    const processedTx = {
-                      signature: sig.signature,
-                      timestamp: tx.blockTime,
-                      solChange: txSolChange,
-                      success: !tx.meta.err,
-                      priceAtSale: currentPrice || 30,
-                      priceAtAcquisition: acquirePrice || 25,
-                      valueUSD: txSolChange * (currentPrice || 30),
-                      fee: tx.meta.fee / LAMPORTS_PER_SOL,
-                      sender: tx.transaction.message.accountKeys[0].toString(),
-                      receiver: tx.transaction.message.accountKeys.length > 1 ? tx.transaction.message.accountKeys[1].toString() : '',
-                      programIds: programIdsArray,
-                      type: txType,
-                      tokenAction,
-                      tokenInfo: transactionTokens.length > 0 ? transactionTokens[0] : null,
-                      perpsInfo: perpsInfo, // Add perps information if available
-                      dex: dexProgramId ? DEX_PROGRAM_IDS[dexProgramId] : null
-                    };
-                    
-                    // Cache individual transaction
-                    saveToCache(cacheSubKey, processedTx);
-                    
-                    return processedTx;
+                  if (!txResponse) {
+                    console.error(`Transaction ${sig.signature.substring(0, 8)}... not found via direct connection`);
+                    return null;
                   }
                   
-                  return null;
-                } catch (error) {
-                  if (error.message?.includes('429')) {
-                    console.log('Rate limit hit, will retry in the next batch');
-                    throw error; // Let fetchWithRetry handle the retry logic
-                  }
-                  console.error(`Error processing transaction: ${error.message}`);
+                  console.log(`Successfully fetched transaction ${sig.signature.substring(0, 8)}... via direct connection`);
+                  
+                  // Format to match our expected structure
+                  tx = {
+                    blockTime: txResponse.blockTime,
+                    meta: txResponse.meta,
+                    transaction: txResponse.transaction,
+                    slot: txResponse.slot,
+                    version: txResponse.version
+                  };
+                } catch (connectionError) {
+                  console.error(`Direct connection fallback also failed: ${connectionError.message}`);
                   return null;
                 }
-              })()
-            );
-          }
-          
-          // Wait for the current batch to complete
-          const results = await Promise.allSettled(batchPromises);
-          const successfulTxs = results
-            .filter(r => r.status === 'fulfilled' && r.value)
-            .map(r => r.value);
-          
-          processedTxs.push(...successfulTxs);
-          
-          // Update progress - more granular
-          const progressPercent = 50 + Math.min((processedTxs.length / totalSignatures.length) * 50, 49);
-          setLoadingProgress(progressPercent);
-          
-          // Adaptive batch delay based on success rate
-          const successRate = successfulTxs.length / batchPromises.length;
-          const adjustedDelay = successRate < 0.5 
-            ? RATE_LIMIT.BATCH_DELAY * 1.5  // If seeing high failure rate, slow down
-            : RATE_LIMIT.BATCH_DELAY;
-            
-          await sleep(adjustedDelay);
-        }
-      }
-
-      // Process and sort transactions
-      let runningBalance = 0;
-      const processedTransactions = processedTxs
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .map(tx => {
-          const oldBalance = runningBalance;
-          runningBalance += tx.solChange;
-          return {
-            ...tx,
-            runningBalance,
-            balanceBefore: oldBalance,
-            realizedGain: tx.solChange < 0 ? 
-              Math.abs(tx.solChange) * (tx.priceAtSale - tx.priceAtAcquisition) : 0
-          };
-        });
-
-      // Cache the results
-      saveToCache(cacheKey, processedTransactions);
-      setLoadingProgress(100);
-      setTransactions(processedTransactions);
-      console.log(`Completed processing ${processedTransactions.length} transactions for wallet: ${walletAddress}`);
-      window.transactions = processedTransactions; // Ensure global availability
-
-      // For debugging - log transaction structure
-      if (processedTransactions.length > 0) {
-        console.log('Sample transaction structure:', processedTransactions[0]);
-      }
-
-      // Calculate tax implications
-      const nonGasTransactions = processedTransactions.filter(tx => 
-        tx.type !== 'gas' && !tx.isInternalTransfer
-      );
-
-      // Default results if we have no valid transactions
-      if (nonGasTransactions.length === 0) {
-        const results = {
-          totalCapitalGains: 0,
-          shortTermGains: 0,
-          longTermGains: 0,
-          estimatedTaxes: 0,
-          transactionsByMonth: [],
-          crypto: {
-            totalTransactions: 0,
-            uniqueTokens: 0,
-            totalVolume: 0,
-            realizedGains: 0,
-            estimatedTax: 0,
-            gasFees: 0,
-            internalTransfers: processedTransactions.filter(tx => tx.isInternalTransfer).length
-          },
-          traditional: {
-            totalIncome: Number(formData.salary) || 0,
-            stockGains: Number(formData.stockIncome) || 0,
-            realEstateGains: Number(formData.realEstateIncome) || 0,
-            dividendIncome: Number(formData.dividends) || 0,
-            estimatedTax: 0
-          }
-        };
-        
-        console.log('Setting default results for empty transaction list:', results);
-        setResults(results);
-      } else {
-        // Regular calculation for transactions
-        const results = {
-          crypto: {
-            totalTransactions: nonGasTransactions.length,
-            uniqueTokens: calculateUniqueTokens(nonGasTransactions),
-            totalVolume: calculateVolume(nonGasTransactions),
-            realizedGains: nonGasTransactions.reduce((sum, tx) => sum + (tx.realizedGain || 0), 0),
-            estimatedTax: nonGasTransactions.reduce((sum, tx) => sum + ((tx.realizedGain || 0) * 0.30), 0),
-            gasFees: calculateGasFees(processedTransactions),
-            internalTransfers: processedTransactions.filter(tx => tx.isInternalTransfer).length,
-          },
-          traditional: {
-            totalIncome: Number(formData.salary) || 0,
-            stockIncome: Number(formData.stockIncome) || 0,
-            realEstateIncome: Number(formData.realEstateIncome) || 0,
-            dividends: Number(formData.dividends) || 0,
-            totalTraditionalIncome: Number(formData.salary) || 0 + Number(formData.dividends) || 0
-          }
-        };
-        
-        console.log('Setting results:', results);
-        setResults(results);
-      }
+              }
+              
+      console.log("Checking Solana connection status...");
       
-      // Reset wallet processing status when done
-      setWalletProcessingStatus(prev => {
-        const completedWallets = specificWalletAddress != null
-          ? [...prev.completedWallets, specificWalletAddress]
-          : [...prev.completedWallets, ...formData.walletAddresses.filter(addr => addr && addr.length >= 32)];
-        
-        return {
-          ...prev,
-          currentWallet: null,
-          completedWallets
-        };
+      // Simple test to verify connection is working
+      const blockHeight = await executeWithRetry(async () => {
+        return await connection.getBlockHeight();
       });
       
-      // Show transaction dashboard
-      setShowWalletInputs(false);
+      console.log(`Solana connection is healthy. Current block height: ${blockHeight}`);
       
-    } catch (error) {
-      console.error("Error analyzing taxes:", error);
-      
-      // Set default results even on error
-      setResults({
-        totalCapitalGains: 0,
-        shortTermGains: 0,
-        longTermGains: 0,
-        estimatedTaxes: 0,
-        transactionsByMonth: [],
-        crypto: {
-          totalTransactions: 0,
-          uniqueTokens: 0,
-          totalVolume: 0,
-          realizedGains: 0,
-          estimatedTax: 0,
-          gasFees: 0,
-          internalTransfers: 0
-        },
-        traditional: {
-          totalIncome: Number(formData.salary) || 0,
-          stockIncome: Number(formData.stockIncome) || 0,
-          realEstateIncome: Number(formData.realEstateIncome) || 0,
-          dividends: Number(formData.dividends) || 0,
-          totalTraditionalIncome: 0
-        }
-      });
-      
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const generateTaxForm = (formType) => {
-    const formTemplates = {
-      '8949': `Form 8949 - Sales and Other Dispositions of Capital Assets
-    Taxpayer: ${formData.firstName} ${formData.lastName}
-    Tax Year: ${new Date().getFullYear()}
-    
-    Part I - Short-term Capital Gains and Losses
-    ${results?.crypto?.totalTransactions ? `Total Transactions: ${results.crypto.totalTransactions}
-    Total Gains/Losses: $${results.crypto.realizedGains.toFixed(2)}` : 'No transactions to report'}
-    `,
-      'scheduleD': `Schedule D - Capital Gains and Losses
-    Taxpayer: ${formData.firstName} ${formData.lastName}
-    Tax Year: ${new Date().getFullYear()}
-    
-    Part I - Short-term Capital Gains and Losses
-    Total Proceeds: $${results?.crypto?.realizedGains?.toFixed(2) || '0.00'}
-    Total Cost Basis: $${(results?.crypto?.realizedGains * 0.8).toFixed(2) || '0.00'}
-    Net Short-term Gain/Loss: $${results?.crypto?.realizedGains.toFixed(2) || '0.00'}
-    `,
-      '1040': `Form 1040 - U.S. Individual Income Tax Return
-    Taxpayer: ${formData.firstName} ${formData.lastName}
-    Tax Year: ${new Date().getFullYear()}
-    
-    Income:
-    1. Wages and Salary: $${formData.salary || '0.00'}
-    2. Interest: $0.00
-    3. Dividends: $${formData.dividends || '0.00'}
-    4. Crypto Gains: $${results?.crypto?.realizedGains.toFixed(2) || '0.00'}
-    5. Real Estate: $${formData.realEstateIncome || '0.00'}
-    
-    Total Income: $${(
-        (Number(formData.salary) || 0) + 
-        (Number(formData.dividends) || 0) + 
-        (results?.crypto?.realizedGains || 0) + 
-        (Number(formData.realEstateIncome) || 0)
-      ).toFixed(2)}
-    `,
-      'schedule1': `Schedule 1 - Additional Income and Adjustments
-    Taxpayer: ${formData.firstName} ${formData.lastName}
-    Tax Year: ${new Date().getFullYear()}
-    
-    Part I - Additional Income
-    1. Crypto Mining Income: $0.00
-    2. Staking Rewards: $0.00
-    3. NFT Sales: $0.00
-    
-    Total Additional Income: $0.00
-    `
-    };
-
-    const content = formTemplates[formType] || 'Form content not available';
-    
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `form_${formType}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const generateAllForms = () => {
-    ['8949', 'scheduleD', '1040', 'schedule1'].forEach((formType, index) => {
-      setTimeout(() => {
-        generateTaxForm(formType);
-      }, index * 500);
-    });
-  };
-
-  // Toggle user info page
-  const toggleUserInfoPage = () => {
-    setShowUserInfoPage(!showUserInfoPage);
-  };
-
-  // Go to dashboard
-  const goToDashboard = () => {
-    setShowUserInfoPage(false);
-    setCurrentPage('dashboard');
-    setActiveSection('dashboard');
-    
-    // Refresh wallet balances when going back to dashboard
-    if (results) {
-      fetchWalletBalances();
-    }
-  };
-
-  // Fetch current wallet balances directly from the blockchain
-  const fetchWalletBalances = async () => {
-    const validWalletAddresses = formData.walletAddresses.filter(addr => addr.length >= 32);
-    if (validWalletAddresses.length === 0) return {};
-    
-    try {
-      console.log('Fetching current wallet balances...');
-      setLoadingBalances(true);
-      const connection = new Connection(SOLANA_RPC_ENDPOINT, 'confirmed');
-      const balances = {};
-      
-      for (const address of validWalletAddresses) {
-        try {
-          console.log(`Fetching balance for wallet: ${address}`);
-          const pubKey = new PublicKey(address);
-          const balance = await connection.getBalance(pubKey);
-          balances[address] = balance / LAMPORTS_PER_SOL;
-          console.log(`Wallet ${address} balance: ${balances[address]} SOL`);
-        } catch (error) {
-          console.error(`Error fetching balance for ${address}:`, error);
-          balances[address] = 0;
-        }
-        // Add a small delay to avoid rate limits
-        await sleep(200);
-      }
-      
-      console.log('Wallet balances successfully fetched:', balances);
-      setWalletBalances(balances);
-      return balances;
-    } catch (error) {
-      console.error('Error fetching wallet balances:', error);
-      return {};
-    } finally {
-      setLoadingBalances(false);
-    }
-  };
-
-  // Handle navigation between different sections
-  const handleNavigate = (page) => {
-    setCurrentPage(page);
-    
-    // Handle different page navigations
-    if (page === 'dashboard') {
-      setShowUserInfoPage(false);
-      setActiveSection('dashboard');
-    } 
-    else if (page === 'account') {
-      setShowUserInfoPage(true);
-    }
-    else if (page === 'reports') {
-      setShowUserInfoPage(false);
-      setActiveSection('reports');
-    }
-    else if (page === 'wallets') {
-      setShowUserInfoPage(false);
-      setActiveSection('wallets');
-      setShowWalletInputs(true);
-    }
-  };
-  
-  // Update current page when showing user info
-  useEffect(() => {
-    if (showUserInfoPage) {
-      setCurrentPage('account');
-    }
-  }, [showUserInfoPage]);
-
-  // Show wallet inputs on initial load or when adding wallets
-  useEffect(() => {
-    if (formData.walletAddresses.length === 0 || 
-        (formData.walletAddresses.length === 1 && formData.walletAddresses[0] === '')) {
-      setShowWalletInputs(true);
-    }
-  }, [formData.walletAddresses]);
-
-  // Create function shells that use the refs
-  const analyzeTaxes = (specificWalletAddress = null) => {
-    if (analyzeTaxesRef.current) {
-      return analyzeTaxesRef.current(specificWalletAddress);
-    } else {
-      console.log("analyzeTaxes called but not fully initialized");
-      return Promise.resolve(); // Return a resolved promise
-    }
-  };
-
-  const processNextWalletInQueue = () => {
-    if (processNextWalletInQueueRef.current) {
-      return processNextWalletInQueueRef.current();
-    } else {
-      console.log("processNextWalletInQueue called but not fully initialized");
-      return Promise.resolve(); // Return a resolved promise
-    }
-  };
-
-  const queueWalletForProcessing = (walletAddress) => {
-    if (queueWalletForProcessingRef.current) {
-      return queueWalletForProcessingRef.current(walletAddress);
-    } else {
-      console.log("queueWalletForProcessing called but not fully initialized");
-      return Promise.resolve(); // Return a resolved promise
-    }
-  };
-
-  // New useEffect to load wallets from Supabase when user logs in
-  useEffect(() => {
-    const loadUserWalletsFromSupabase = async () => {
-      if (!authUser) return;
-      
+      // Also try to check Helius API health directly
       try {
-        console.log('Loading wallets from Supabase for user:', authUser.id);
-        
-        // Fetch wallets from Supabase
-        const { success, data: wallets } = await getUserWallets(authUser.id);
-        
-        if (success && wallets && wallets.length > 0) {
-          // Update form data with the wallets
-          const walletAddresses = wallets.map(w => w.wallet_address);
-          const walletNames = wallets.map(w => w.wallet_name);
-          
-          setFormData(prev => ({
-            ...prev,
-            walletAddresses: walletAddresses.length ? walletAddresses : [''],
-            walletNames: walletNames.length ? walletNames : ['My Wallet']
-          }));
-          
-          console.log('Loaded wallets from Supabase:', walletAddresses);
-          
-          // Load wallet balances for the wallets
-          fetchWalletBalances();
-        }
-      } catch (error) {
-        console.error('Error loading wallets from Supabase:', error);
+        const healthStatus = await checkHeliusHealth();
+        console.log(`Helius API health status: ${healthStatus}`);
+      } catch (healthError) {
+        // Log but continue as the main connection is working
+        console.warn(`Helius API health check failed, but main connection is working: ${healthError.message}`);
       }
-    };
-    
-    loadUserWalletsFromSupabase();
-  }, [authUser]);
-
-  // Add a utility function to save transactions to Supabase
-  const saveTransactionsToSupabase = async (walletAddress, transactionData) => {
-    if (!authUser || !walletAddress || !transactionData || transactionData.length === 0) {
-      console.log('Cannot save transactions: missing required data');
+      
+      return true;
+    } catch (error) {
+      console.error("Solana connection check failed:", error.message);
+      
+      // Update UI with error information
+      setRateLimitInfo({
+        isRateLimited: true,
+        message: `Connection Error: ${error.message}. Please try again later.`,
+        nextRetryTime: new Date(Date.now() + 5000)
+      });
+      
       return false;
     }
-    
+  } // removed semicolon
+
+  // Add this alternative method for fetching transactions
+  const fetchWalletTransactionsFromHelius = async (walletAddress, limit = 100, beforeSignature = null) => {
     try {
-      console.log(`Saving ${transactionData.length} transactions for wallet ${walletAddress} to Supabase`);
+      // Use the Helius address transactions endpoint - construct URL directly
+      let url = `${HELIUS_WALLET_TRANSACTIONS_URL}${walletAddress}/transactions?api-key=${HELIUS_API_KEY}`;
+      url += `&limit=${limit}`;
       
-      // Find the wallet in the user's wallet collection
-      const { success, data: wallets } = await getUserWallets(authUser.id);
-      
-      if (success && wallets) {
-        const wallet = wallets.find(w => w.wallet_address === walletAddress);
-        
-        if (wallet) {
-          // Format the transactions for Supabase
-          const formattedTransactions = transactionData.map(tx => ({
-            wallet_id: wallet.id,
-            signature: tx.signature,
-            block_time: tx.timestamp ? new Date(tx.timestamp * 1000) : null,
-            success: tx.success,
-            transaction_type: tx.type || 'unknown',
-            amount: tx.solChange || null,
-            token_symbol: tx.tokenInfo?.symbol || null,
-            usd_value: tx.valueUSD || null,
-            raw_data: JSON.stringify(tx)
-          }));
-          
-          // Save transactions to Supabase
-          const result = await saveTransactions(wallet.id, formattedTransactions);
-          
-          if (result.success) {
-            console.log(`Successfully saved ${formattedTransactions.length} transactions to Supabase`);
-            return true;
-          }
-        } else {
-          console.error(`Wallet ${walletAddress} not found in user's wallets`);
-        }
+      if (beforeSignature) {
+        url += `&before=${beforeSignature}`;
       }
       
-      return false;
+      console.log(`Fetching wallet transactions directly from Helius: ${url.substring(0, 100)}...`);
+      
+      const response = await fetchWithRetry(async () => {
+        const result = await fetch(url);
+        
+        if (!result.ok) {
+          const errorText = await result.text();
+          console.error(`Wallet transactions API error:`, errorText);
+          throw new Error(`Failed to fetch wallet transactions: ${result.status} ${result.statusText}`);
+        }
+        
+        return result;
+      });
+      
+      const responseText = await response.text();
+      console.log(`Raw response: ${responseText.substring(0, 150)}...`);
+      
+      // Try to parse the JSON response
+      let transactions = [];
+      try {
+        transactions = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error(`Error parsing JSON response: ${parseError.message}`);
+        return [];
+      }
+      
+      if (!transactions || !Array.isArray(transactions)) {
+        console.warn(`Invalid response from wallet transactions API:`, transactions);
+        return [];
+      }
+      
+      console.log(`Successfully fetched ${transactions.length} transactions directly from Helius`);
+      
+      // Process transactions to ensure they match our expected format
+      const processedTransactions = transactions.map(tx => {
+        // Basic validation and structure correction
+        if (!tx.signature && tx.id) {
+          tx.signature = tx.id; // Some versions of the API use id instead of signature
+        }
+        
+        return tx;
+      });
+      
+      return processedTransactions;
     } catch (error) {
-      console.error('Error saving transactions to Supabase:', error);
-      return false;
+      console.error(`Error fetching wallet transactions from Helius:`, error.message);
+      return null; // Return null to indicate error, allowing fallback to other methods
     }
   };
-
-  // Skip landing page for authenticated users
-  useEffect(() => {
-    if (user || authUser) {
-      setShowLandingPage(false);
-    }
-  }, [user, authUser]);
 
   return (
     <div className={`${appLoaded ? 'fade-in' : 'opacity-0'}`}>
@@ -1640,11 +1266,16 @@ function App({ user }) {
               results={results}
               clearTransactionCache={clearTransactionCache}
               clearAllTransactionCache={clearAllTransactionCache}
+              resetAllAppData={resetAllAppData}
               goBackToDashboard={goToDashboard}
               walletProcessingStatus={walletProcessingStatus}
               queueWalletForProcessing={queueWalletForProcessing}
               user={authUser}
               saveTransactionsToSupabase={saveTransactionsToSupabase}
+              saveWalletAndPull={saveWalletAndPull}
+              removeWallet={removeWallet}
+              walletSaving={walletSaving}
+              activeWalletIndex={activeWalletIndex}
             />
           ) : (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -1656,7 +1287,7 @@ function App({ user }) {
                     <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500 dark:from-blue-400 dark:to-green-300">
                       Connect Your Wallets
                     </span>
-                  </h1>
+            </h1>
                   <p className="text-xl text-geist-accent-600 dark:text-geist-accent-300 animate-fade-in-delay mb-12">
                     Add your Solana wallet addresses to begin transaction analysis
                   </p>
@@ -1669,23 +1300,23 @@ function App({ user }) {
                           <div className="flex-1">
                             <label className="block text-sm font-medium text-geist-accent-600 dark:text-geist-accent-300 text-left mb-2">
                               Wallet Name
-                            </label>
-                            <input
-                              type="text"
+                  </label>
+                  <input
+                    type="text"
                               value={formData.walletNames[index] || ''}
                               onChange={(e) => handleWalletNameChange(index, e.target.value)}
                               className="block w-full px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 border border-geist-accent-200 dark:border-geist-accent-600 rounded-xl focus:ring-geist-success focus:border-geist-success transition-colors"
                               placeholder="My Wallet"
-                            />
-                          </div>
+                  />
+                </div>
                           
                           <div className="flex-1">
                             <label className="block text-sm font-medium text-geist-accent-600 dark:text-geist-accent-300 text-left mb-2">
                               Wallet Address
-                            </label>
+                  </label>
                             <div className="flex">
-                              <input
-                                type="text"
+                  <input
+                    type="text"
                                 value={address}
                                 onChange={(e) => {
                                   const newAddresses = [...formData.walletAddresses];
@@ -1695,12 +1326,21 @@ function App({ user }) {
                                     walletAddresses: newAddresses
                                   });
                                 }}
-                                className="block w-full px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 border border-geist-accent-200 dark:border-geist-accent-600 rounded-l-xl focus:ring-geist-success focus:border-geist-success transition-colors"
+                                className={`block w-full px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 border ${
+                                  address && !validateWalletAddress(address) 
+                                    ? 'border-red-500 dark:border-red-400' 
+                                    : 'border-geist-accent-200 dark:border-geist-accent-600'
+                                } rounded-l-xl focus:ring-geist-success focus:border-geist-success transition-colors`}
                                 placeholder="Enter Solana wallet address"
                               />
-                              <button
+                <button
                                 onClick={() => queueWalletForProcessing(address)}
-                                disabled={!address || address.length < 32 || walletProcessingStatus.currentWallet === address || walletProcessingStatus.queuedWallets.includes(address)}
+                                disabled={
+                                  !address || 
+                                  !validateWalletAddress(address) || 
+                                  walletProcessingStatus.currentWallet === address || 
+                                  walletProcessingStatus.queuedWallets.includes(address)
+                                }
                                 className="px-4 py-3 bg-geist-success text-white font-medium rounded-r-xl hover:bg-opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {walletProcessingStatus.currentWallet === address ? (
@@ -1714,18 +1354,23 @@ function App({ user }) {
                                 ) : walletProcessingStatus.queuedWallets.includes(address) ? (
                                   <span className="flex items-center">
                                     Queued
-                                  </span>
-                                ) : (
+                    </span>
+                  ) : (
                                   <span className="flex items-center">
                                     Connect
                                   </span>
-                                )}
-                              </button>
+                  )}
+                </button>
                             </div>
+                            {address && !validateWalletAddress(address) && (
+                              <p className="mt-1 text-sm text-red-500 dark:text-red-400 text-left">
+                                Invalid Solana wallet address. Please enter a valid address.
+                              </p>
+                            )}
                           </div>
-
+                
                           {index > 0 && (
-                            <button
+                  <button
                               onClick={() => {
                                 const newAddresses = [...formData.walletAddresses];
                                 newAddresses.splice(index, 1);
@@ -1742,14 +1387,14 @@ function App({ user }) {
                               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
-                            </button>
-                          )}
+                  </button>
+                )}
                         </div>
                       ))}
                     </div>
-
+                
                     <div className="mt-6 flex">
-                      <button
+                  <button
                         onClick={() => {
                           setFormData({
                             ...formData,
@@ -1763,7 +1408,7 @@ function App({ user }) {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                         </svg>
                         Add Another Wallet
-                      </button>
+                  </button>
                     </div>
                   </div>
 
@@ -1792,8 +1437,8 @@ function App({ user }) {
                         </span>
                       )}
                     </button>
-                  </div>
-                </div>
+              </div>
+            </div>
               )}
               
               {activeSection === 'dashboard' && (
@@ -1807,11 +1452,11 @@ function App({ user }) {
                       <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
                         <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
                           {formData.walletAddresses.filter(addr => addr.length >= 32).length}
-                        </div>
+                    </div>
                         <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                           Connected Wallets
-                        </div>
-                      </div>
+                    </div>
+                    </div>
 
                       <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
                         {loadingBalances ? (
@@ -1820,18 +1465,18 @@ function App({ user }) {
                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                          </div>
+                    </div>
                         ) : (
                           <>
                             <div className="text-3xl font-bold text-geist-success dark:text-green-300 mb-2">
                               {Object.values(walletBalances).reduce((sum, balance) => sum + balance, 0).toFixed(4)} SOL
-                            </div>
+                    </div>
                             <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                               Current Balance
-                            </div>
+                  </div>
                           </>
                         )}
-                      </div>
+                </div>
 
                       <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
                         <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
@@ -1841,17 +1486,17 @@ function App({ user }) {
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                               </svg>
-                            </div>
+                    </div>
                           ) : transactions.length}
-                        </div>
+                    </div>
                         <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                           Total Transactions
-                        </div>
-                      </div>
+                    </div>
                     </div>
                   </div>
-                  
-                  {/* Transaction Dashboard */}
+                </div>
+
+                {/* Transaction Dashboard */}
                   <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
                     <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Transaction Dashboard</h2>
                     
@@ -1862,9 +1507,11 @@ function App({ user }) {
                       walletAddresses={formData.walletAddresses}
                       walletNames={formData.walletNames}
                       onWalletSelect={setSelectedWallet}
+                      loading={loading}
+                      batchProgress={batchProgress}
                     />
-                  </div>
-                  
+                </div>
+
                   {/* Tax forms and calculations */}
                   {results && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1873,8 +1520,8 @@ function App({ user }) {
                         <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Tax Forms</h2>
                         
                         <div className="space-y-4">
-                          <button
-                            onClick={() => generateTaxForm('8949')}
+                        <button
+                          onClick={() => generateTaxForm('8949')}
                             className="w-full flex items-center justify-between px-4 py-3 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-xl hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600 transition-colors"
                           >
                             <span className="font-medium text-geist-accent-900 dark:text-geist-foreground">Form 8949</span>
@@ -1918,9 +1565,9 @@ function App({ user }) {
                             className="w-full mt-4 px-4 py-3 bg-geist-success bg-opacity-90 text-white rounded-xl font-medium hover:bg-opacity-100 transition-colors"
                           >
                             Generate All Forms
-                          </button>
-                        </div>
+                        </button>
                       </div>
+                    </div>
 
                       {/* Tax Summary */}
                       <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in col-span-2">
@@ -1937,7 +1584,7 @@ function App({ user }) {
                                   style: 'currency',
                                   currency: 'USD'
                                 })}` : 'N/A'}
-                            </div>
+                        </div>
                           </div>
                           
                           <div className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5">
@@ -1985,7 +1632,7 @@ function App({ user }) {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div 
-                          onClick={() => generateTaxForm('8949')}
+                      onClick={() => generateTaxForm('8949')}
                       className="bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl p-5 hover:shadow-md cursor-pointer transition-all"
                     >
                       <div className="flex justify-between items-center mb-3">
@@ -2008,7 +1655,7 @@ function App({ user }) {
                         <svg className="w-5 h-5 text-geist-accent-500 dark:text-geist-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                      </div>
+                        </div>
                       <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                         Capital Gains and Losses
                       </p>
@@ -2048,17 +1695,17 @@ function App({ user }) {
                   <div className="mt-8">
                     <button
                       onClick={generateAllForms}
-                      className="px-6 py-3 bg-geist-success text-white rounded-xl font-medium hover:bg-opacity-90 transition-colors flex items-center"
+                      className="px-6 py-3 bg-geist-success text-white rounded-xl font-medium hover:bg-opacity-100 transition-colors flex items-center"
                     >
                       <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                       </svg>
                       Generate All Forms
                     </button>
-                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+        </div>
           )}
         </AppLayout>
       )}

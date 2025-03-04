@@ -228,4 +228,58 @@ export const saveTransactions = async (walletId, transactions) => {
     console.error('Error saving transactions:', error);
     return { success: false, error: error.message };
   }
+};
+
+// Function to delete all user data from Supabase for testing purposes
+export const deleteAllUserData = async (userId) => {
+  try {
+    // Delete all transactions from the user's wallets
+    const { data: wallets, error: walletsError } = await supabase
+      .from('wallets')
+      .select('id')
+      .eq('user_id', userId);
+      
+    if (walletsError) throw walletsError;
+    
+    if (wallets && wallets.length > 0) {
+      const walletIds = wallets.map(wallet => wallet.id);
+      
+      // Delete all transactions for these wallets
+      const { error: transactionDeleteError } = await supabase
+        .from('transactions')
+        .delete()
+        .in('wallet_id', walletIds);
+        
+      if (transactionDeleteError) throw transactionDeleteError;
+    }
+    
+    // Delete all wallets for the user
+    const { error: walletDeleteError } = await supabase
+      .from('wallets')
+      .delete()
+      .eq('user_id', userId);
+      
+    if (walletDeleteError) throw walletDeleteError;
+    
+    // Note: We don't delete the profile itself, just reset its data
+    const { error: profileUpdateError } = await supabase
+      .from('profiles')
+      .update({
+        first_name: null,
+        last_name: null,
+        salary: 0,
+        stock_income: 0,
+        real_estate_income: 0,
+        dividends: 0,
+        updated_at: new Date()
+      })
+      .eq('id', userId);
+      
+    if (profileUpdateError) throw profileUpdateError;
+    
+    return { success: true, message: 'All user data deleted successfully' };
+  } catch (error) {
+    console.error('Error deleting user data:', error);
+    return { success: false, error: error.message };
+  }
 }; 

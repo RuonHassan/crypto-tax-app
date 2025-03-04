@@ -93,6 +93,48 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 If you encounter any issues or have questions, please open an issue on the repository.
 
+## Token Registry Service
+
+The application now includes a powerful Token Registry Service that enhances transaction processing by providing accurate token metadata. The service:
+
+1. **On-Chain Metadata**: Fetches token metadata directly from the Solana blockchain using the Token Metadata Program, providing accurate information for any token encountered.
+
+2. **Intelligent Caching**: Implements a sophisticated caching system to minimize RPC calls and improve performance.
+
+3. **Fallback Mechanisms**: Uses a multi-layered approach to token identification:
+   - First tries the local cache
+   - Then checks known tokens list
+   - Finally fetches metadata from on-chain sources
+   - Creates sensible defaults for unknown tokens
+
+4. **Rate Limiting Protection**: Includes queue processing with batch handling to prevent RPC rate limits.
+
+5. **Enhanced Transaction Processing**: Automatically identifies tokens involved in transactions, improving the accuracy of transaction type detection.
+
+### Usage
+
+The token registry service is used throughout the application to:
+
+- Identify tokens involved in DEX transactions (swaps, buys, sells)
+- Provide accurate token symbols and names in the transaction table
+- Enhance transaction categorization for better tax calculations
+
+### Implementation Details
+
+The token registry uses Metaplex's Token Metadata Program to fetch on-chain metadata for SPL tokens. It employs a singleton pattern to maintain a consistent cache across the application.
+
+```javascript
+// Example: Getting token metadata
+import tokenRegistryService from './services/tokenRegistryService';
+
+// Fetch metadata for a token
+const tokenInfo = await tokenRegistryService.getTokenMetadata('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+console.log(tokenInfo.symbol); // 'USDC'
+
+// Extract tokens from a transaction
+const tokens = await tokenRegistryService.extractTokensFromTransaction(transaction, accountKeys);
+```
+
 ---
 
 Made with ❤️ by Your Team Name

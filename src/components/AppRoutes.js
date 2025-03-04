@@ -20,6 +20,7 @@ const AppRoutes = ({
   transactions,
   clearTransactionCache,
   clearAllTransactionCache,
+  resetAllAppData,
   walletProcessingStatus,
   queueWalletForProcessing,
   // Current app state

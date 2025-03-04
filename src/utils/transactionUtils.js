@@ -1,11 +1,25 @@
 // src/utils/transactionUtils.js
+import tokenRegistryService from '../services/tokenRegistryService';
+import { JUPITER_PERPS_PROGRAM_IDS, PERPS_TRANSACTION_TYPES, isJupiterPerpsTransaction, parseJupiterPerpsTransaction } from './jupiterPerpsUtils';
 
 export const TRANSACTION_TYPES = {
     TRANSFER: 'transfer',
     SWAP: 'swap',
     GAS: 'gas',
     INTERNAL_TRANSFER: 'internal_transfer',
-    TOKEN_TRANSACTION: 'token_transaction'
+    TOKEN_TRANSACTION: 'token_transaction',
+    BUY: 'buy',
+    SELL: 'sell',
+    PERPS_ORDER: 'perps-order',
+    PERPS_CLOSE: 'perps-close',
+    PERPS_INCREASE: 'perps-increase',
+    PERPS_DECREASE: 'perps-decrease',
+    PERPS_INSTANT_INCREASE: 'perps-instant-increase',
+    PERPS_INSTANT_DECREASE: 'perps-instant-decrease',
+    PERPS_LIQUIDATION: 'perps-liquidation',
+    PERPS_MARGIN: 'perps-margin',
+    FEE: 'fee',
+    UNKNOWN: 'unknown'
 };
 
 // Known DEX program IDs for transaction identification
@@ -14,65 +28,53 @@ export const DEX_PROGRAMS = {
     'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB': 'Jupiter',
     'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX': 'Serum',
     'RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr': 'Raydium',
-    '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium AMM'
+    '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium AMM',
+    'JPPooLEqRb2LuVYJx6mjSfJA7YWcqQz2iCfBdz7k9Cn': 'Jupiter Perps',
+    'M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K': 'Meteora'
 };
 
-// Simplified token metadata detection from Jupiter-like transactions
-const extractTokenInfoFromAccounts = (accounts = [], programId) => {
-    // This is a simplified approach - in a production app, we'd want to use
-    // a token registry or on-chain token metadata program to lookup details
+// Enhanced token metadata extraction leveraging the tokenRegistryService
+const extractTokenInfoFromAccounts = async (accounts = [], programId) => {
+    // Use the token registry service for more reliable token detection
+    if (!accounts || !accounts.length) return null;
     
-    // Look for token accounts (typically SPL token accounts show up as transaction participants)
-    const tokenInfo = {
-        symbol: '',
-        name: '',
-        amount: 0
-    };
-    
-    // For Jupiter or Raydium transactions, we can make some assumptions about token transactions
-    if (accounts.length > 5 && (
-        programId === 'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB' || // Jupiter
-        programId === 'RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr' || // Raydium
-        programId === '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'    // Raydium AMM
-    )) {
-        // From the example, for simplicity, we'll recognize common token swaps
-        // In a real app, we would identify the token mint addresses and look them up
+    try {
+        // Extract potential token addresses first
+        let potentialTokens = [];
         
-        // Example token name extraction - this is just for demonstration
-        // In a real app, we'd decode the transaction instructions
-        const knownTokens = {
-            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
-            'So11111111111111111111111111111111111111112': 'SOL',
-            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
-            'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So': 'mSOL'
-        };
-        
-        // Check if we have tokens in the accounts list
-        for (const account of accounts) {
-            if (knownTokens[account]) {
-                tokenInfo.symbol = knownTokens[account];
-                tokenInfo.name = knownTokens[account];
-                break;
-            }
+        // If it's a DEX transaction, all accounts are potential token addresses
+        if (programId && DEX_PROGRAMS[programId]) {
+            potentialTokens = [...accounts];
+        } else {
+            // Otherwise, just check a sample of accounts (to avoid unnecessary lookups)
+            potentialTokens = accounts.slice(0, 5);
         }
         
-        // If we didn't find a known token but it's from a DEX, it might be an unknown token
-        if (!tokenInfo.symbol && DEX_PROGRAMS[programId]) {
-            tokenInfo.symbol = "Unknown Token";
-            tokenInfo.name = "Unknown Token";
-        }
+        // Use token registry service to identify tokens
+        const tokenPromises = potentialTokens.map(account => {
+            const accountStr = typeof account === 'string' ? account : account?.toString();
+            if (!accountStr) return null;
+            return tokenRegistryService.getTokenMetadata(accountStr);
+        });
+        
+        // Get results and filter out null values
+        const tokens = (await Promise.all(tokenPromises)).filter(Boolean);
+        
+        // Return the first valid token found, or null if none
+        return tokens.length > 0 ? tokens[0] : null;
+    } catch (error) {
+        console.error('Error extracting token info:', error);
+        return null;
     }
-    
-    return tokenInfo;
 };
 
-export const groupTransactions = (transactions) => {
+export const groupTransactions = async (transactions) => {
     let gasFees = 0;
     let linkedTransactions = new Map(); // Map to store linked transactions
     let processedTxs = new Set(); // Keep track of processed transactions
 
     // First pass: identify and link related transactions
-    transactions.forEach(tx => {
+    for (const tx of transactions) {
         if (tx.isInternalTransfer && !processedTxs.has(tx.signature)) {
             // Find the corresponding transaction in the destination wallet
             const relatedTx = transactions.find(t => 
@@ -95,12 +97,12 @@ export const groupTransactions = (transactions) => {
                 processedTxs.add(relatedTx.signature);
             }
         }
-    });
+    }
 
     // Second pass: process remaining transactions
-    const groupedTransactions = transactions
+    const groupedTransactionsPromises = transactions
         .filter(tx => !processedTxs.has(tx.signature))
-        .map(tx => {
+        .map(async tx => {
             if (Math.abs(tx.solChange) < 0.001) {
                 gasFees += Math.abs(tx.solChange);
                 return {
@@ -114,7 +116,7 @@ export const groupTransactions = (transactions) => {
             
             // For token transactions, extract token info
             if (isDexTransaction) {
-                const tokenInfo = extractTokenInfoFromAccounts(tx.accounts, tx.programId);
+                const tokenInfo = await extractTokenInfoFromAccounts(tx.accounts, tx.programId);
                 
                 // If negative SOL change and DEX transaction, likely buying a token
                 if (tx.solChange < 0) {
@@ -152,6 +154,9 @@ export const groupTransactions = (transactions) => {
             };
         });
 
+    // Wait for all promises to resolve
+    const groupedTransactions = await Promise.all(groupedTransactionsPromises);
+
     // Combine regular and linked transactions
     const allTransactions = [
         ...groupedTransactions,
@@ -173,21 +178,98 @@ export const calculateVolume = (transactions) => {
     }, 0);
 };
 
-export const categorizeTransaction = (tx) => {
-    if (tx.type === TRANSACTION_TYPES.GAS) {
-        return 'Gas Fee';
+export const categorizeTransaction = (tx, walletAddress) => {
+    if (!tx) return TRANSACTION_TYPES.UNKNOWN;
+
+    try {
+        // Check for Jupiter Perps transactions first
+        if (isJupiterPerpsTransaction(tx)) {
+            const perpsDetails = parseJupiterPerpsTransaction(tx);
+            if (perpsDetails) {
+                // Map Jupiter Perps transaction types to our transaction types
+                switch (perpsDetails.type) {
+                    case PERPS_TRANSACTION_TYPES.OPEN_POSITION:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_ORDER,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.CLOSE_POSITION:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_CLOSE,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.INCREASE_POSITION:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_INCREASE,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.DECREASE_POSITION:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_DECREASE,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.INSTANT_INCREASE:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_INSTANT_INCREASE,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.INSTANT_DECREASE:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_INSTANT_DECREASE,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.LIQUIDATION:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_LIQUIDATION,
+                            details: perpsDetails.details
+                        };
+                    case PERPS_TRANSACTION_TYPES.ADD_MARGIN:
+                    case PERPS_TRANSACTION_TYPES.REMOVE_MARGIN:
+                        return {
+                            type: TRANSACTION_TYPES.PERPS_MARGIN,
+                            details: perpsDetails.details
+                        };
+                    default:
+                        // Only categorize as fee if we're sure it's not another type
+                        if (perpsDetails.type === PERPS_TRANSACTION_TYPES.FEE) {
+                            return {
+                                type: TRANSACTION_TYPES.FEE,
+                                details: perpsDetails.details
+                            };
+                        }
+                }
+            }
+        }
+
+        // If not a perps transaction, check for regular fee transactions
+        if (tx.meta?.fee && !tx.meta?.logMessages?.some(log => {
+            const lowerLog = log.toLowerCase();
+            return lowerLog.includes('perp') || 
+                   lowerLog.includes('position') || 
+                   lowerLog.includes('margin') || 
+                   lowerLog.includes('liquidate') ||
+                   lowerLog.includes('instantincreaseposition') ||
+                   lowerLog.includes('instant_increase_position') ||
+                   lowerLog.includes('increaseposition');
+        })) {
+            return {
+                type: TRANSACTION_TYPES.FEE,
+                details: {
+                    amount: tx.meta.fee,
+                    timestamp: tx.blockTime,
+                    signature: tx.transaction.signatures[0]
+                }
+            };
+        }
+
+        // Continue with existing transaction categorization...
+        // Add your existing logic here for other transaction types
+        
+        return TRANSACTION_TYPES.UNKNOWN;
+    } catch (error) {
+        console.error('Error categorizing transaction:', error);
+        return TRANSACTION_TYPES.UNKNOWN;
     }
-    if (tx.type === TRANSACTION_TYPES.INTERNAL_TRANSFER) {
-        return 'Internal Transfer';
-    }
-    if (tx.type === TRANSACTION_TYPES.SWAP) {
-        return 'Token Swap';
-    }
-    if (tx.type === TRANSACTION_TYPES.TOKEN_TRANSACTION) {
-        const tokenSymbol = tx.tokenInfo?.symbol || 'Token';
-        return `${tx.tokenAction || 'Swap'} ${tokenSymbol}`;
-    }
-    return tx.solChange > 0 ? 'Receive' : 'Send';
 };
 
 export const calculateGasFees = (transactions) => {
