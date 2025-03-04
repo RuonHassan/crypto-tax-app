@@ -28,7 +28,7 @@ const SidebarNav = ({
   };
   
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex flex-col h-full">
       {/* User section */}
       <div className="p-4 border-b border-geist-accent-200 dark:border-geist-accent-700 flex items-center space-x-3">
         <div className="w-10 h-10 rounded-full bg-geist-accent-300 dark:bg-geist-accent-700 flex items-center justify-center text-geist-accent-800 dark:text-geist-accent-100 font-semibold">
@@ -45,7 +45,7 @@ const SidebarNav = ({
       </div>
       
       {/* Navigation items */}
-      <nav className="flex-1 px-2 py-4">
+      <nav className="flex-1 px-2 py-4 overflow-y-auto">
         <ul className="space-y-1">
           <li>
             <button 
@@ -110,8 +110,8 @@ const SidebarNav = ({
         </ul>
       </nav>
       
-      {/* Logout button */}
-      <div className="p-4 border-t border-geist-accent-200 dark:border-geist-accent-700">
+      {/* Logout button - Fixed at bottom with padding for mobile */}
+      <div className="sticky bottom-0 left-0 right-0 p-4 mt-auto bg-white dark:bg-geist-accent-800 border-t border-geist-accent-200 dark:border-geist-accent-700">
         <button 
           onClick={signOut}
           className="w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800 transition-colors"

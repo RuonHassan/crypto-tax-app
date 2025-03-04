@@ -1,4 +1,5 @@
 // src/utils/transactionUtils.js
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import tokenRegistryService from '../services/tokenRegistryService';
 import { JUPITER_PERPS_PROGRAM_IDS, PERPS_TRANSACTION_TYPES, isJupiterPerpsTransaction, parseJupiterPerpsTransaction } from './jupiterPerpsUtils';
 
@@ -241,16 +242,77 @@ export const categorizeTransaction = (tx, walletAddress) => {
             }
         }
 
-        // If not a perps transaction, check for regular fee transactions
+        // Check for transfers between wallets
+        const accountKeys = tx.transaction.message.accountKeys.map(key => 
+            typeof key === 'string' ? key : key.pubkey || key.toString()
+        );
+        const preBalances = tx.meta?.preBalances || [];
+        const postBalances = tx.meta?.postBalances || [];
+        
+        // Find the wallet's index in the transaction
+        const walletIndex = accountKeys.findIndex(key => key === walletAddress);
+        
+        if (walletIndex !== -1) {
+            const walletBalanceChange = (postBalances[walletIndex] || 0) - (preBalances[walletIndex] || 0);
+            
+            // Look for significant balance changes (more than 5000 lamports to filter out gas fees)
+            if (Math.abs(walletBalanceChange) > 5000) {
+                // For outgoing transfers
+                if (walletBalanceChange < 0) {
+                    // Find the receiving account
+                    const destinationIndex = accountKeys.findIndex((key, index) => {
+                        if (index !== walletIndex) {
+                            const balanceChange = (postBalances[index] || 0) - (preBalances[index] || 0);
+                            return balanceChange > 5000; // Significant positive change
+                        }
+                        return false;
+                    });
+
+                    if (destinationIndex !== -1) {
+                        return {
+                            type: TRANSACTION_TYPES.TRANSFER,
+                            details: {
+                                source: walletAddress,
+                                destination: accountKeys[destinationIndex],
+                                amount: Math.abs(walletBalanceChange) / LAMPORTS_PER_SOL,
+                                timestamp: tx.blockTime
+                            }
+                        };
+                    }
+                }
+                // For incoming transfers
+                else {
+                    // Find the sending account
+                    const sourceIndex = accountKeys.findIndex((key, index) => {
+                        if (index !== walletIndex) {
+                            const balanceChange = (postBalances[index] || 0) - (preBalances[index] || 0);
+                            return balanceChange < -5000; // Significant negative change
+                        }
+                        return false;
+                    });
+
+                    if (sourceIndex !== -1) {
+                        return {
+                            type: TRANSACTION_TYPES.TRANSFER,
+                            details: {
+                                source: accountKeys[sourceIndex],
+                                destination: walletAddress,
+                                amount: walletBalanceChange / LAMPORTS_PER_SOL,
+                                timestamp: tx.blockTime
+                            }
+                        };
+                    }
+                }
+            }
+        }
+
+        // If not a perps transaction or transfer, check for regular fee transactions
         if (tx.meta?.fee && !tx.meta?.logMessages?.some(log => {
             const lowerLog = log.toLowerCase();
             return lowerLog.includes('perp') || 
                    lowerLog.includes('position') || 
                    lowerLog.includes('margin') || 
-                   lowerLog.includes('liquidate') ||
-                   lowerLog.includes('instantincreaseposition') ||
-                   lowerLog.includes('instant_increase_position') ||
-                   lowerLog.includes('increaseposition');
+                   lowerLog.includes('liquidate');
         })) {
             return {
                 type: TRANSACTION_TYPES.FEE,
@@ -262,9 +324,6 @@ export const categorizeTransaction = (tx, walletAddress) => {
             };
         }
 
-        // Continue with existing transaction categorization...
-        // Add your existing logic here for other transaction types
-        
         return TRANSACTION_TYPES.UNKNOWN;
     } catch (error) {
         console.error('Error categorizing transaction:', error);

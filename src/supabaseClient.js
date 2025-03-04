@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 // Try environment variables first, then fallback to hardcoded values for development
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
+const siteUrl = process.env.REACT_APP_SITE_URL || window.location.origin
 
 // Check if the credentials are available
 if (!supabaseUrl) {
@@ -14,10 +15,19 @@ if (!supabaseAnonKey) {
 }
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+    redirectTo: siteUrl
+  }
+})
 
 // Export the configuration for debugging purposes
 export const supabaseConfig = {
   url: supabaseUrl,
-  hasKey: !!supabaseAnonKey
+  hasKey: !!supabaseAnonKey,
+  siteUrl
 } 

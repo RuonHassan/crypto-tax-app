@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TRANSACTION_TYPES, categorizeTransaction, DEX_PROGRAMS } from '../utils/transactionUtils';
-import { Spinner, Progress } from '@geist-ui/core';
+import { Spinner, Progress, Toggle } from '@geist-ui/core';
+
+// Utility function to shorten wallet addresses
+const shortenAddress = (address) => {
+  if (!address) return '';
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+};
 
 /**
  * Displays batch processing progress for transactions
@@ -72,14 +78,26 @@ const TransactionDashboard = ({
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
+  const [hideSpam, setHideSpam] = useState(true);
   const itemsPerPage = 10;
 
-  // Filter transactions based on selected wallet
+  // Filter transactions based on selected wallet and spam filter
   const filteredTransactions = useMemo(() => {
-    return selectedWallet === 'all'
+    let filtered = selectedWallet === 'all'
       ? transactions
       : transactions.filter(tx => tx.walletAddress === selectedWallet);
-  }, [transactions, selectedWallet]);
+
+    // Apply spam filter if enabled
+    if (hideSpam) {
+      filtered = filtered.filter(tx => 
+        tx.success !== false && // Remove failed transactions
+        Math.abs(tx.solChange) > 0 && // Remove 0 SOL transactions
+        (tx.usdValue === null || Math.abs(tx.usdValue) >= 0.01) // Remove transactions worth less than $0.01
+      );
+    }
+
+    return filtered;
+  }, [transactions, selectedWallet, hideSpam]);
 
   // Sort transactions
   const sortedTransactions = useMemo(() => {
@@ -156,35 +174,55 @@ const TransactionDashboard = ({
     }).format(value);
   };
 
+  // Function to open transaction in Solflare
+  const openInSolflare = (signature) => {
+    window.open(`https://solscan.io/tx/${signature}`, '_blank');
+  };
+
   return (
     <div className="space-y-4">
-      {/* Wallet Selection */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <button
-          onClick={() => onWalletSelect('all')}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            selectedWallet === 'all'
-              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-              : 'bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700'
-          }`}
-        >
-          All Wallets
-        </button>
-        {walletAddresses.map((address, index) => (
-          address && (
-            <button
-              key={address}
-              onClick={() => onWalletSelect(address)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                selectedWallet === address
-                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                  : 'bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700'
-              }`}
-            >
-              {walletNames[index] || `Wallet ${index + 1}`}
-            </button>
-          )
-        ))}
+      {/* Top Controls */}
+      <div className="flex justify-between items-center mb-4">
+        {/* Wallet Selection */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => onWalletSelect('all')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              selectedWallet === 'all'
+                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                : 'bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700'
+            }`}
+          >
+            All Wallets
+          </button>
+          {walletAddresses.map((address, index) => (
+            address && (
+              <button
+                key={address}
+                onClick={() => onWalletSelect(address)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  selectedWallet === address
+                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                    : 'bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700'
+                }`}
+              >
+                {walletNames[index] || `Wallet ${index + 1}`}
+              </button>
+            )
+          ))}
+        </div>
+
+        {/* Spam Filter Toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-geist-accent-600 dark:text-geist-accent-400">
+            Hide Spam
+          </span>
+          <Toggle 
+            checked={hideSpam}
+            onChange={(e) => setHideSpam(e.target.checked)}
+            scale={0.8}
+          />
+        </div>
       </div>
 
       {/* Loading State */}
@@ -205,15 +243,29 @@ const TransactionDashboard = ({
       {/* Desktop Table View */}
       <div className="hidden lg:block overflow-x-auto">
         <table className="min-w-full divide-y divide-geist-accent-200 dark:divide-geist-accent-700">
-          <thead>
-            <tr className="text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
-              <th className="px-4 py-3" onClick={() => handleSort('timestamp')}>Date</th>
-              <th className="px-4 py-3">Type</th>
-              <th className="px-4 py-3" onClick={() => handleSort('solChange')}>Amount (SOL)</th>
-              <th className="px-4 py-3" onClick={() => handleSort('usdValue')}>Value (USD)</th>
-              <th className="px-4 py-3">Wallet</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Fee</th>
+          <thead className="bg-geist-accent-50 dark:bg-geist-accent-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Date
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Type
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Amount
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                USD Value
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Wallet
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Details
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-geist-accent-600 dark:text-geist-accent-400 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-geist-accent-200 dark:divide-geist-accent-700">
@@ -245,17 +297,23 @@ const TransactionDashboard = ({
                 <td className="px-4 py-3 whitespace-nowrap text-geist-accent-600 dark:text-geist-accent-400">
                   {walletMap[tx.walletAddress] || 'Unknown Wallet'}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    tx.success 
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                      : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                  }`}>
-                    {tx.success ? 'Success' : 'Failed'}
-                  </span>
-                </td>
                 <td className="px-4 py-3 whitespace-nowrap text-geist-accent-600 dark:text-geist-accent-400">
-                  {tx.fee ? `${tx.fee.toFixed(6)} SOL` : '-'}
+                  {tx.type === TRANSACTION_TYPES.TRANSFER && tx.destination_address && (
+                    <div className="flex flex-col">
+                      <span className="text-xs">To: {walletMap[tx.destination_address] || shortenAddress(tx.destination_address)}</span>
+                      {tx.is_internal_transfer && (
+                        <span className="text-xs text-geist-success dark:text-geist-success/70">Internal Transfer</span>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <button
+                    onClick={() => openInSolflare(tx.signature)}
+                    className="text-xs px-2 py-1 rounded-md bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700 transition-colors"
+                  >
+                    View on Solflare
+                  </button>
                 </td>
               </tr>
             ))}
@@ -295,6 +353,14 @@ const TransactionDashboard = ({
               <span className="text-sm text-geist-accent-900 dark:text-geist-accent-100">
                 {formatUSD(tx.usdValue)}
               </span>
+            </div>
+            <div className="mt-2 flex justify-end">
+                    <button
+                onClick={() => openInSolflare(tx.signature)}
+                className="text-xs px-2 py-1 rounded-md bg-geist-accent-100 text-geist-accent-700 dark:bg-geist-accent-800 dark:text-geist-accent-300 hover:bg-geist-accent-200 dark:hover:bg-geist-accent-700 transition-colors"
+              >
+                View on Solflare
+          </button>
             </div>
           </div>
         ))}

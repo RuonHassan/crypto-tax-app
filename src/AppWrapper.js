@@ -9,12 +9,19 @@ import AppAdapter from './adapters/AppAdapter';
 const AppWrapper = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [showLanding, setShowLanding] = useState(true);
+  const [showLanding, setShowLanding] = useState(!user);
 
   // Initialize dark mode globally
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
+
+  // Update showLanding when auth state changes
+  useEffect(() => {
+    if (!loading) {
+      setShowLanding(!user);
+    }
+  }, [user, loading]);
 
   const handleGetStarted = () => {
     setShowLanding(false);
@@ -34,14 +41,14 @@ const AppWrapper = () => {
 
   return (
     <Routes>
-      {/* If authenticated, always redirect to app; otherwise show the landing page */}
+      {/* Landing/Home route */}
       <Route 
         path="/" 
         element={
-          user ? (
-            <Navigate to="/app" />
-          ) : (
+          showLanding ? (
             <LandingPage onGetStarted={handleGetStarted} />
+          ) : (
+            user ? <Navigate to="/app" /> : <Navigate to="/login" />
           )
         } 
       />
@@ -55,7 +62,7 @@ const AppWrapper = () => {
       {/* Protected route for main app */}
       <Route 
         path="/app/*" 
-        element={!user ? <Navigate to="/login" /> : <AppAdapter />} 
+        element={!user ? <Navigate to="/" /> : <AppAdapter />} 
       />
       
       {/* Redirect any other routes to root */}

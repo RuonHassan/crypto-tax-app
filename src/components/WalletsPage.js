@@ -108,7 +108,7 @@ const WalletsPage = ({
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header Section */}
-      <div className="flex justify-between items-center mb-8">
+      <div className="space-y-4 sm:space-y-0 sm:flex sm:justify-between sm:items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground">
             Wallet Management
@@ -119,7 +119,7 @@ const WalletsPage = ({
         </div>
         <button
           onClick={() => setShowAddWallet(true)}
-          className="px-4 py-2 bg-geist-success text-white rounded-xl font-medium hover:bg-opacity-90 transition-all flex items-center"
+          className="w-full sm:w-auto px-4 py-2 bg-geist-success text-white rounded-xl font-medium hover:bg-opacity-90 transition-all flex items-center justify-center sm:justify-start"
         >
           <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -130,8 +130,11 @@ const WalletsPage = ({
 
       {/* Add Wallet Modal */}
       {showAddWallet && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-geist-accent-800 rounded-2xl p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div 
+            className="bg-white dark:bg-geist-accent-800 rounded-2xl p-6 w-full max-w-md shadow-2xl transform transition-all duration-300 scale-100 animate-scale-up border border-geist-accent-200/50 dark:border-geist-accent-700/50"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-geist-accent-900 dark:text-geist-foreground">
                 Add New Wallet
@@ -141,7 +144,7 @@ const WalletsPage = ({
                   setShowAddWallet(false);
                   setError('');
                 }}
-                className="text-geist-accent-500 hover:text-geist-accent-700 dark:text-geist-accent-400 dark:hover:text-geist-accent-200"
+                className="text-geist-accent-500 hover:text-geist-accent-700 dark:text-geist-accent-400 dark:hover:text-geist-accent-200 p-1 rounded-lg hover:bg-geist-accent-100 dark:hover:bg-geist-accent-700 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
