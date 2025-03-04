@@ -1,18 +1,13 @@
 import React from 'react';
-import { DarkModeToggle } from '../App';
+import Logo from './Logo';
 
 const LandingPage = ({ onGetStarted }) => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-geist-accent-100 to-white dark:from-geist-background dark:to-geist-accent-800">
-      <DarkModeToggle />
-      
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <nav className="py-6">
           <div className="flex justify-between items-center">
-            <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground flex items-center">
-              <span className="text-3xl mr-2 bg-geist-success bg-opacity-90 text-white px-3 py-1 rounded-lg transform -rotate-3">Tax</span>
-              <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500">AI</span>
-            </div>
+            <Logo size="default" />
             <button
               onClick={onGetStarted}
               className="text-geist-accent-600 dark:text-geist-accent-300 hover:text-geist-accent-900 dark:hover:text-geist-foreground transition-colors font-medium"
@@ -80,7 +75,7 @@ const LandingPage = ({ onGetStarted }) => {
             <div className="max-w-3xl mx-auto">
               <h3 className="text-2xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">What Our Users Say</h3>
               <div className="italic text-lg text-geist-accent-600 dark:text-geist-accent-300 mb-6">
-                "TaxAI saved me hours of work and helped me identify transactions I would have missed. The token tracking is incredible!"
+                "CryptoTax saved me hours of work and helped me identify transactions I would have missed. The token tracking is incredible!"
               </div>
               <div className="flex items-center justify-center">
                 <div className="w-12 h-12 bg-geist-accent-200 dark:bg-geist-accent-700 rounded-full flex items-center justify-center mr-4">

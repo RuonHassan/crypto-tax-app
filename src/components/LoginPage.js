@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import Logo from './Logo';
 
 const LoginPage = ({ onSuccess }) => {
   const [email, setEmail] = useState('');
@@ -74,9 +75,8 @@ const LoginPage = ({ onSuccess }) => {
     <div className="min-h-screen bg-gradient-to-b from-geist-accent-100 to-white dark:from-geist-background dark:to-geist-accent-800 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full">
         <div className="text-center mb-10">
-          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground flex items-center justify-center mb-6">
-            <span className="text-4xl mr-2 bg-geist-success bg-opacity-90 text-white px-3 py-1 rounded-lg transform -rotate-3">Tax</span>
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500">AI</span>
+          <div className="flex justify-center mb-6">
+            <Logo size="large" />
           </div>
           <h2 className="text-2xl font-extrabold text-geist-accent-900 dark:text-geist-foreground">
             {resetPasswordMode 

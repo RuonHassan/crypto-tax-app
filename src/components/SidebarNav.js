@@ -28,21 +28,13 @@ const SidebarNav = ({
   };
   
   return (
-    <div className="h-screen w-64 bg-white dark:bg-geist-accent-900 shadow-lg flex flex-col border-r border-geist-accent-200 dark:border-geist-accent-700">
-      {/* Logo and app name */}
-      <div className="p-6 border-b border-geist-accent-200 dark:border-geist-accent-700">
-        <div className="text-2xl font-bold text-geist-accent-900 dark:text-geist-foreground flex items-center">
-          <span className="text-3xl mr-2 bg-geist-success bg-opacity-90 text-white px-3 py-1 rounded-lg transform -rotate-3">Tax</span>
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-geist-success to-blue-500">AI</span>
-        </div>
-      </div>
-      
+    <div className="flex flex-col h-full overflow-y-auto">
       {/* User section */}
-      <div className="p-6 border-b border-geist-accent-200 dark:border-geist-accent-700 flex items-center space-x-3">
+      <div className="p-4 border-b border-geist-accent-200 dark:border-geist-accent-700 flex items-center space-x-3">
         <div className="w-10 h-10 rounded-full bg-geist-accent-300 dark:bg-geist-accent-700 flex items-center justify-center text-geist-accent-800 dark:text-geist-accent-100 font-semibold">
           {getDisplayName().charAt(0).toUpperCase()}
         </div>
-        <div className="flex-1 truncate">
+        <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-geist-accent-900 dark:text-geist-foreground truncate">
             {getDisplayName()}
           </p>
@@ -53,14 +45,14 @@ const SidebarNav = ({
       </div>
       
       {/* Navigation items */}
-      <nav className="flex-1 p-4">
-        <ul className="space-y-2">
+      <nav className="flex-1 px-2 py-4">
+        <ul className="space-y-1">
           <li>
             <button 
               onClick={() => handleNavigate('wallets')}
-              className={`w-full text-left px-4 py-2 rounded-lg flex items-center space-x-3 ${
+              className={`w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 transition-colors ${
                 currentPage === 'wallets' 
-                  ? 'bg-geist-accent-100 dark:bg-geist-accent-800 text-geist-accent-900 dark:text-geist-foreground' 
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
                   : 'text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800'
               }`}
             >
@@ -73,9 +65,9 @@ const SidebarNav = ({
           <li>
             <button 
               onClick={() => handleNavigate('dashboard')}
-              className={`w-full text-left px-4 py-2 rounded-lg flex items-center space-x-3 ${
+              className={`w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 transition-colors ${
                 currentPage === 'dashboard' 
-                  ? 'bg-geist-accent-100 dark:bg-geist-accent-800 text-geist-accent-900 dark:text-geist-foreground' 
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
                   : 'text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800'
               }`}
             >
@@ -88,9 +80,9 @@ const SidebarNav = ({
           <li>
             <button 
               onClick={() => handleNavigate('reports')}
-              className={`w-full text-left px-4 py-2 rounded-lg flex items-center space-x-3 ${
+              className={`w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 transition-colors ${
                 currentPage === 'reports' 
-                  ? 'bg-geist-accent-100 dark:bg-geist-accent-800 text-geist-accent-900 dark:text-geist-foreground' 
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
                   : 'text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800'
               }`}
             >
@@ -103,9 +95,9 @@ const SidebarNav = ({
           <li>
             <button 
               onClick={() => handleNavigate('account')}
-              className={`w-full text-left px-4 py-2 rounded-lg flex items-center space-x-3 ${
+              className={`w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 transition-colors ${
                 currentPage === 'account' 
-                  ? 'bg-geist-accent-100 dark:bg-geist-accent-800 text-geist-accent-900 dark:text-geist-foreground' 
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' 
                   : 'text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800'
               }`}
             >
@@ -122,7 +114,7 @@ const SidebarNav = ({
       <div className="p-4 border-t border-geist-accent-200 dark:border-geist-accent-700">
         <button 
           onClick={signOut}
-          className="w-full text-left px-4 py-2 rounded-lg flex items-center space-x-3 text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800"
+          className="w-full text-left px-3 py-2 rounded-lg flex items-center space-x-3 text-geist-accent-700 dark:text-geist-accent-300 hover:bg-geist-accent-100 dark:hover:bg-geist-accent-800 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

@@ -56,10 +56,10 @@ const DEBUG_MODE = true;
 
 // Constants
 const RATE_LIMIT = {
-  REQUEST_DELAY: 100,  // ms between requests
-  BATCH_DELAY: 1000,   // ms between batches
+  REQUEST_DELAY: 50,    // Reduce from 100ms to 50ms
+  BATCH_DELAY: 500,     // Reduce from 1000ms to 500ms
   MAX_RETRIES: 5,
-  BATCH_SIZE: 10
+  BATCH_SIZE: 50        // Increase from 10 to 50
 };
 
 // RPC throttler for rate limiting
@@ -298,7 +298,7 @@ const [bypassCache, setBypassCache] = useState(false);
       const realAnalyzeTaxes = async (specificWalletAddress = null) => {
         try {
           console.log('Starting transaction analysis...');
-          setLoading(true);
+        setLoading(true);
           setResults(null);
 
           // Validate connection first
@@ -328,7 +328,7 @@ const [bypassCache, setBypassCache] = useState(false);
               
               // Update UI with progress
               setResults(prev => ({
-                ...prev,
+                    ...prev,
                 transactions: allTransactions,
                 walletStats: {
                   ...prev?.walletStats,
@@ -338,7 +338,7 @@ const [bypassCache, setBypassCache] = useState(false);
                   }
                 }
               }));
-            } catch (error) {
+      } catch (error) {
               console.error(`Error processing wallet ${walletAddress}:`, error);
               // Continue with next wallet if one fails
             }
@@ -357,7 +357,7 @@ const [bypassCache, setBypassCache] = useState(false);
 
           // Update final results
           setResults(prev => ({
-            ...prev,
+                    ...prev,
             summary,
             isComplete: true
           }));
@@ -546,17 +546,17 @@ const [bypassCache, setBypassCache] = useState(false);
   const getFiscalYearDates = () => {
     try {
       const connection = new Connection(HELIUS_RPC_URL);
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth() + 1; // JavaScript months are 0-based
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // JavaScript months are 0-based
+  
+    // If we're in the first half of the calendar year, use previous year
+    const fiscalYear = currentMonth >= 7 ? currentYear : currentYear - 1;
     
-      // If we're in the first half of the calendar year, use previous year
-      const fiscalYear = currentMonth >= 7 ? currentYear : currentYear - 1;
-      
-      const startDate = new Date(`${fiscalYear}-07-01`);
-      const endDate = new Date(`${fiscalYear + 1}-06-30`);
-    
-      return { startDate, endDate };
+    const startDate = new Date(`${fiscalYear}-07-01`);
+    const endDate = new Date(`${fiscalYear + 1}-06-30`);
+  
+    return { startDate, endDate };
     } catch (error) {
       console.error('Error getting fiscal year dates:', error);
       return null;
@@ -1162,14 +1162,14 @@ const [bypassCache, setBypassCache] = useState(false);
         if (!tx) return null;
         
         // Calculate SOL amount changes
-        const solChange = calculateSolChange(tx, walletAddress);
-        
+          const solChange = calculateSolChange(tx, walletAddress);
+          
         // Basic transaction info
         const processedTx = {
           signature: tx.transaction.signatures[0],
           timestamp: tx.blockTime,
           walletAddress,
-          solChange,
+            solChange,
           successful: tx.meta?.err === null,
           fee: tx.meta?.fee ? tx.meta.fee / LAMPORTS_PER_SOL : 0,
           accounts: tx.transaction.message.accountKeys.map(key => key.toString())
@@ -1393,8 +1393,10 @@ const [bypassCache, setBypassCache] = useState(false);
     if (page === 'dashboard') {
       setShowUserInfoPage(false);
       setActiveSection('dashboard');
-      // Load transactions when switching to dashboard
-      loadTransactionsFromDatabase();
+      // Only load transactions if we're not already processing
+      if (!backgroundProcessing.active) {
+        loadTransactionsFromDatabase();
+      }
     } 
     else if (page === 'account') {
       setShowUserInfoPage(true);
@@ -1558,9 +1560,9 @@ const [bypassCache, setBypassCache] = useState(false);
     }
 
     try {
-      setWalletSaving(true);
-      setActiveWalletIndex(index);
-
+    setWalletSaving(true);
+    setActiveWalletIndex(index);
+    
       // Validate the wallet address first
       if (!walletAddress || walletAddress.length < 32) {
         throw new Error('Invalid wallet address');
@@ -1682,8 +1684,8 @@ const [bypassCache, setBypassCache] = useState(false);
           ...prev,
           walletStats
         }));
-      }
-    } catch (error) {
+          }
+        } catch (error) {
       console.error('Error loading wallets from Supabase:', error);
       setResults(prev => ({
         ...prev,
@@ -1730,7 +1732,7 @@ const [bypassCache, setBypassCache] = useState(false);
       return false;
     }
   };
-
+  
   // Function to remove a wallet
   const removeWallet = async (index) => {
     const walletAddress = formData.walletAddresses[index];
@@ -1751,23 +1753,23 @@ const [bypassCache, setBypassCache] = useState(false);
       }
       
       // Update local state
-      const updatedAddresses = [...formData.walletAddresses];
-      const updatedNames = [...formData.walletNames];
-      
-      updatedAddresses.splice(index, 1);
-      updatedNames.splice(index, 1);
+    const updatedAddresses = [...formData.walletAddresses];
+    const updatedNames = [...formData.walletNames];
+    
+    updatedAddresses.splice(index, 1);
+    updatedNames.splice(index, 1);
       
       // If removing the last wallet, add an empty one
       if (updatedAddresses.length === 0) {
         updatedAddresses.push('');
         updatedNames.push('My Wallet');
       }
-      
-      setFormData({
-        ...formData,
-        walletAddresses: updatedAddresses,
-        walletNames: updatedNames
-      });
+    
+    setFormData({
+      ...formData,
+      walletAddresses: updatedAddresses,
+      walletNames: updatedNames
+    });
       
       // Clear the wallet's balance
       setWalletBalances(prev => {
@@ -1960,75 +1962,108 @@ const [bypassCache, setBypassCache] = useState(false);
     }
   };
 
-  // Main function to initiate transaction fetching for a wallet
+  // Add new state for background processing
+  const [backgroundProcessing, setBackgroundProcessing] = useState({
+    active: false,
+    walletAddress: null,
+    progress: 0
+  });
+
+  // Modified fetchAndProcessTransactions function
   const fetchAndProcessTransactions = async (walletAddress) => {
     try {
       console.log(`Starting transaction fetch for wallet: ${walletAddress}`);
-      setLoadingProgress({
-        status: 'Initializing transaction fetch...',
+      
+      // Set background processing state
+      setBackgroundProcessing(prev => ({
+        active: true,
+        walletAddress,
         progress: 0
-      });
+      }));
       
       let allTransactions = [];
       let beforeSignature = null;
       let hasMore = true;
       let batchNumber = 1;
+      let consecutiveEmptyBatches = 0;
+      const MAX_EMPTY_BATCHES = 3;
       
       // Clear existing transactions for this wallet
-      setTransactions([]);
-      setDbTransactions([]);
+      setTransactions(prev => prev.filter(tx => tx.walletAddress !== walletAddress));
+      setDbTransactions(prev => prev.filter(tx => tx.walletAddress !== walletAddress));
       
       while (hasMore) {
         console.log(`Fetching batch ${batchNumber} for wallet ${walletAddress}...`);
-        const batchResult = await fetchTransactionBatch(walletAddress, beforeSignature);
-        
-        if (!batchResult.transactions.length) {
-          console.log('No more transactions found');
-          hasMore = false;
-          break;
-        }
-        
-        const processedBatch = await processTransactionBatch(batchResult.transactions, walletAddress);
-        console.log(`Processed ${processedBatch.length} transactions in batch ${batchNumber}`);
-        
-        // Save transactions to database
-        if (processedBatch.length > 0) {
-          console.log(`Saving ${processedBatch.length} transactions to database...`);
-          const saved = await saveTransactionsToDatabase(processedBatch);
-          if (!saved) {
-            console.error('Failed to save transactions to database');
+        try {
+          const batchResult = await fetchTransactionBatch(walletAddress, beforeSignature);
+          
+          if (!batchResult.transactions.length) {
+            console.log(`Empty batch received (${consecutiveEmptyBatches + 1}/${MAX_EMPTY_BATCHES})`);
+            consecutiveEmptyBatches++;
+            if (consecutiveEmptyBatches >= MAX_EMPTY_BATCHES) {
+              console.log('Max empty batches reached, stopping fetch');
+              hasMore = false;
+              break;
+            }
+            await sleep(Math.min(1000 * Math.pow(2, consecutiveEmptyBatches), 5000));
+            continue;
           }
+          
+          consecutiveEmptyBatches = 0;
+          
+          const processedBatch = await processTransactionBatch(batchResult.transactions, walletAddress);
+          console.log(`Processed ${processedBatch.length} transactions in batch ${batchNumber}`);
+          
+          if (processedBatch.length > 0) {
+            console.log(`Saving ${processedBatch.length} transactions to database...`);
+            await saveTransactionsToDatabase(processedBatch);
+            
+            // Update transactions in state, preserving other wallet transactions
+            setTransactions(prev => {
+              const withoutCurrentWallet = prev.filter(tx => tx.walletAddress !== walletAddress);
+              return [...withoutCurrentWallet, ...processedBatch];
+            });
+            
+            setDbTransactions(prev => {
+              const withoutCurrentWallet = prev.filter(tx => tx.walletAddress !== walletAddress);
+              return [...withoutCurrentWallet, ...processedBatch];
+            });
+          }
+          
+          allTransactions = [...allTransactions, ...processedBatch];
+          beforeSignature = batchResult.lastSignature;
+          
+          // Update background processing progress
+          setBackgroundProcessing(prev => ({
+            ...prev,
+            progress: Math.min((batchNumber * 5), 100)
+          }));
+          
+          const dynamicDelay = Math.max(
+            100,
+            Math.min(
+              500,
+              processedBatch.length * 10
+            )
+          );
+          await sleep(dynamicDelay);
+          
+          batchNumber++;
+    } catch (error) {
+          console.error(`Error processing batch ${batchNumber}:`, error);
+          await sleep(Math.min(1000 * Math.pow(2, consecutiveEmptyBatches), 5000));
+          continue;
         }
-        
-        allTransactions = [...allTransactions, ...processedBatch];
-        beforeSignature = batchResult.lastSignature;
-        
-        // Sort transactions by timestamp in descending order
-        allTransactions.sort((a, b) => b.block_time - a.block_time);
-        
-        // Update both transaction states with accumulated transactions
-        setTransactions(allTransactions);
-        setDbTransactions(allTransactions);
-        
-        setLoadingProgress({
-          status: `Processed batch ${batchNumber}. Found ${allTransactions.length} transactions so far...`,
-          progress: Math.min((batchNumber * 10), 100)
-        });
-        
-        batchNumber++;
-        await sleep(1000);
       }
       
-      // Update final progress
-      setLoadingProgress({
-        status: 'Processing complete',
+      // Update final states
+      setBackgroundProcessing(prev => ({
+        ...prev,
+        active: false,
         progress: 100
-      });
+      }));
       
       console.log(`Completed processing ${allTransactions.length} transactions for ${walletAddress}`);
-      
-      // Load transactions from database to ensure we have the latest data
-      await loadTransactionsFromDatabase();
       
       // Update wallet processing status
       setWalletProcessingStatus(prev => ({
@@ -2038,27 +2073,13 @@ const [bypassCache, setBypassCache] = useState(false);
         queuedWallets: prev.queuedWallets.filter(w => w !== walletAddress)
       }));
       
-      // Process next wallet in queue if any
-      setTimeout(() => {
-        processNextWalletInQueue();
-      }, 500);
-      
       return allTransactions;
     } catch (error) {
       console.error('Error in fetchAndProcessTransactions:', error);
-      
-      // Update wallet processing status on error
-      setWalletProcessingStatus(prev => ({
+      setBackgroundProcessing(prev => ({
         ...prev,
-        currentWallet: null,
-        queuedWallets: prev.queuedWallets.filter(w => w !== walletAddress)
+        active: false
       }));
-      
-      setLoadingProgress({
-        status: 'Error processing transactions',
-        progress: 0
-      });
-      
       throw error;
     }
   };
@@ -2429,10 +2450,37 @@ const [bypassCache, setBypassCache] = useState(false);
                   validateWalletAddress={validateWalletAddress}
                 />
               )}
-
+              
               {activeSection === 'dashboard' && (
                 /* Dashboard Content */
                 <div className="mt-6 grid grid-cols-1 gap-8">
+                  {/* Background Processing Indicator */}
+                  {backgroundProcessing.active && (
+                    <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-4 animate-fade-in">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-medium text-geist-accent-900 dark:text-geist-foreground">
+                            Processing Transactions
+                          </h3>
+                          <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                            Fetching transactions for {walletMap[backgroundProcessing.walletAddress] || 'wallet'}...
+                          </p>
+                          </div>
+                        <div className="flex items-center">
+                          <div className="w-24 bg-geist-accent-100 dark:bg-geist-accent-700 rounded-full h-2 mr-3">
+                            <div 
+                              className="bg-geist-success h-full rounded-full transition-all duration-500"
+                              style={{ width: `${backgroundProcessing.progress}%` }}
+                            />
+                        </div>
+                          <span className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                            {backgroundProcessing.progress}%
+                          </span>
+                    </div>
+              </div>
+            </div>
+              )}
+              
                   {/* Wallet Stats Overview */}
                   <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
                     <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Wallet Overview</h2>
