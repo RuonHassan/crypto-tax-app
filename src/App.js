@@ -166,8 +166,35 @@ const validateConnection = async () => {
 function App({ user }) {
   const { user: authUser } = useAuth();
   
+  // Add state for tracking if initial state is restored
+  const [isStateRestored, setIsStateRestored] = useState(false);
+  
+  // Initialize showLandingPage based on both user and saved page
+  const [showLandingPage, setShowLandingPage] = useState(() => {
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    return !user && !savedPage; // Only show landing page if no user AND no saved page
+  });
+  
+  // Initialize states with localStorage values
+  const [currentPage, setCurrentPage] = useState(() => {
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    return savedPage || 'wallets';
+  });
+  
+  const [activeSection, setActiveSection] = useState(() => {
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    if (savedPage === 'dashboard') return 'dashboard';
+    if (savedPage === 'reports') return 'reports';
+    if (savedPage === 'account') return 'account';
+    return 'wallets';
+  });
+  
+  const [showUserInfoPage, setShowUserInfoPage] = useState(() => {
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    return savedPage === 'account';
+  });
+  
   // Add missing state variables
-  const [currentWallet, setCurrentWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [formData, setFormData] = useState({
     walletAddresses: [],
@@ -181,14 +208,13 @@ function App({ user }) {
   });
 
   const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState(''); // Add this state for tracking processing steps
+  const [loadingStep, setLoadingStep] = useState('');
   const [results, setResults] = useState(null);
   const [loadingProgress, setLoadingProgress] = useState({
     status: '',
     progress: 0
   });
-  const [showLandingPage, setShowLandingPage] = useState(!user); // Initialize based on authentication status
-const [bypassCache, setBypassCache] = useState(false);
+  const [bypassCache, setBypassCache] = useState(false);
   const [rateLimitInfo, setRateLimitInfo] = useState({
     isLimited: false,
     retryCount: 0,
@@ -196,22 +222,18 @@ const [bypassCache, setBypassCache] = useState(false);
     message: ''
   });
   
-  // Add state for selected wallet
-  const [selectedWallet, setSelectedWallet] = useState('all');
+  // Add state for selected wallet with localStorage persistence
+  const [selectedWallet, setSelectedWallet] = useState(() => {
+    return localStorage.getItem('selectedWallet') || 'all';
+  });
   
-  // Add onboarding step tracking
   const [onboardingStep, setOnboardingStep] = useState(0);
-  
-  // Add states for UI and tracking
-  const [showUserInfoPage, setShowUserInfoPage] = useState(false);
   const [appLoaded, setAppLoaded] = useState(false);
   const [walletBalances, setWalletBalances] = useState({});
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
-  const [currentPage, setCurrentPage] = useState('wallets');
   const [showWalletInputs, setShowWalletInputs] = useState(false);
-  const [activeSection, setActiveSection] = useState('wallets'); // To track which section is active
   
   // Add state for tracking wallet processing status
   const [walletProcessingStatus, setWalletProcessingStatus] = useState({
@@ -1404,19 +1426,33 @@ const [bypassCache, setBypassCache] = useState(false);
 
   // Handle navigation between different sections
   const handleNavigate = (page) => {
+    if (!user && !authUser && page !== 'landing') {
+      console.log('Preventing navigation while logged out');
+      return;
+    }
+
+    console.log('Navigating to:', page);
     setCurrentPage(page);
+    localStorage.setItem('lastVisitedPage', page);
     
-    // Handle different page navigations
     if (page === 'dashboard') {
       setShowUserInfoPage(false);
       setActiveSection('dashboard');
-      // Only load transactions if we're not already processing
-      if (!backgroundProcessing.active) {
+      // Check if we have a selected wallet in localStorage
+      const savedWallet = localStorage.getItem('selectedWallet');
+      if (savedWallet && savedWallet !== 'all' && savedWallet !== selectedWallet) {
+        setSelectedWallet(savedWallet);
+        // Load data for this specific wallet
+        setTimeout(() => {
+          analyzeTaxes(savedWallet);
+        }, 100);
+      } else if (!backgroundProcessing.active) {
         loadTransactionsFromDatabase();
       }
     } 
     else if (page === 'account') {
       setShowUserInfoPage(true);
+      setActiveSection('account');
     }
     else if (page === 'reports') {
       setShowUserInfoPage(false);
@@ -1429,21 +1465,56 @@ const [bypassCache, setBypassCache] = useState(false);
     }
   };
   
-  // Update current page when showing user info
+  // Update the state restoration effect
   useEffect(() => {
-    if (showUserInfoPage) {
-      setCurrentPage('account');
+    if (isStateRestored) return; // Only run once
+    
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    const savedWallet = localStorage.getItem('selectedWallet');
+    
+    if (savedPage) {
+      console.log('Restoring saved page:', savedPage);
+      
+      // Set states directly instead of using handleNavigate to avoid race conditions
+      setCurrentPage(savedPage);
+      setShowUserInfoPage(savedPage === 'account');
+      setActiveSection(savedPage);
+      
+      if (savedPage === 'dashboard') {
+        if (savedWallet && savedWallet !== 'all') {
+          setSelectedWallet(savedWallet);
+          // Delay loading transactions to ensure all states are set
+          setTimeout(() => {
+            analyzeTaxes(savedWallet);
+          }, 500);
+        } else {
+          setTimeout(() => {
+            loadTransactionsFromDatabase();
+          }, 500);
+        }
+      } else if (savedPage === 'wallets') {
+        setShowWalletInputs(true);
+      }
     }
-  }, [showUserInfoPage]);
+    
+    setIsStateRestored(true);
+  }, []);
 
-  // Show wallet inputs on initial load or when adding wallets
+  // Add an effect to ensure page state consistency
   useEffect(() => {
-    if (formData.walletAddresses.length === 0 || 
-        (formData.walletAddresses.length === 1 && formData.walletAddresses[0] === '')) {
-      setShowWalletInputs(true);
+    if (!isStateRestored) return;
+    
+    const currentSavedPage = localStorage.getItem('lastVisitedPage');
+    if (currentSavedPage && currentSavedPage !== currentPage) {
+      console.log('Page state mismatch, restoring to:', currentSavedPage);
+      setCurrentPage(currentSavedPage);
+      setActiveSection(currentSavedPage);
+      setShowUserInfoPage(currentSavedPage === 'account');
     }
-  }, [formData.walletAddresses]);
+  }, [currentPage, isStateRestored]);
 
+  // Remove the duplicate useEffects for page restoration since we handle it in the initialization
+  
   // Create function shells that use the refs
   const analyzeTaxes = (specificWalletAddress = null) => {
     if (analyzeTaxesRef.current) {
@@ -1560,8 +1631,11 @@ const [bypassCache, setBypassCache] = useState(false);
   useEffect(() => {
     if (user || authUser) {
       setShowLandingPage(false);
-      setCurrentPage('wallets');
-      setActiveSection('wallets');
+      // Only set to wallets if there's no saved page
+      if (!localStorage.getItem('lastVisitedPage')) {
+        setCurrentPage('wallets');
+        setActiveSection('wallets');
+      }
     }
   }, [user, authUser]);
 
@@ -1770,23 +1844,17 @@ const [bypassCache, setBypassCache] = useState(false);
       }
       
       // Update local state
-    const updatedAddresses = [...formData.walletAddresses];
-    const updatedNames = [...formData.walletNames];
-    
-    updatedAddresses.splice(index, 1);
-    updatedNames.splice(index, 1);
+      const updatedAddresses = [...formData.walletAddresses];
+      const updatedNames = [...formData.walletNames];
       
-      // If removing the last wallet, add an empty one
-      if (updatedAddresses.length === 0) {
-        updatedAddresses.push('');
-        updatedNames.push('My Wallet');
-      }
-    
-    setFormData({
-      ...formData,
-      walletAddresses: updatedAddresses,
-      walletNames: updatedNames
-    });
+      updatedAddresses.splice(index, 1);
+      updatedNames.splice(index, 1);
+      
+      setFormData({
+        ...formData,
+        walletAddresses: updatedAddresses,
+        walletNames: updatedNames
+      });
       
       // Clear the wallet's balance
       setWalletBalances(prev => {
@@ -2395,6 +2463,69 @@ const [bypassCache, setBypassCache] = useState(false);
   useEffect(() => {
     loadTransactionsFromDatabase();
   }, [authUser, formData.walletAddresses, formData.walletNames]);
+
+  // Effect to restore active section
+  useEffect(() => {
+    const savedPage = localStorage.getItem('lastVisitedPage');
+    if (savedPage) {
+      setActiveSection(savedPage);
+      setShowUserInfoPage(savedPage === 'account');
+    }
+  }, []);
+
+  // Effect to save active section
+  useEffect(() => {
+    if (activeSection) {
+      localStorage.setItem('lastVisitedPage', activeSection);
+    }
+  }, [activeSection]);
+
+  // Update the selectedWallet in localStorage whenever it changes
+  useEffect(() => {
+    if (selectedWallet) {
+      localStorage.setItem('selectedWallet', selectedWallet);
+    }
+  }, [selectedWallet]);
+
+  // Add effect to handle auth state changes including logout
+  useEffect(() => {
+    if (!user && !authUser) {
+      // User has logged out
+      setShowLandingPage(true);
+      setCurrentPage('landing');
+      setActiveSection('landing');
+      // Clear saved page on logout
+      localStorage.removeItem('lastVisitedPage');
+      localStorage.removeItem('selectedWallet');
+      // Reset other relevant states
+      setTransactions([]);
+      setFormData({
+        walletAddresses: [],
+        walletNames: [],
+        firstName: '',
+        lastName: '',
+        salary: '',
+        stockIncome: '',
+        realEstateIncome: '',
+        dividends: ''
+      });
+      setResults(null);
+      setWalletBalances({});
+      setSelectedWallet('all');
+    }
+  }, [user, authUser]);
+
+  // Update the authentication effect to handle initial load
+  useEffect(() => {
+    if (user || authUser) {
+      setShowLandingPage(false);
+      // Only set to wallets if there's no saved page
+      if (!localStorage.getItem('lastVisitedPage')) {
+        setCurrentPage('wallets');
+        setActiveSection('wallets');
+      }
+    }
+  }, [user, authUser]);
 
   return (
     <div className={`${appLoaded ? 'fade-in' : 'opacity-0'}`}>
