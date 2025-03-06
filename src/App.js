@@ -2489,6 +2489,8 @@ function App({ user }) {
 
   // Add effect to handle auth state changes including logout
   useEffect(() => {
+    const previousUser = user || authUser;
+    
     if (!user && !authUser) {
       // User has logged out
       setShowLandingPage(true);
@@ -2512,17 +2514,17 @@ function App({ user }) {
       setResults(null);
       setWalletBalances({});
       setSelectedWallet('all');
-    }
-  }, [user, authUser]);
-
-  // Update the authentication effect to handle initial load
-  useEffect(() => {
-    if (user || authUser) {
-      setShowLandingPage(false);
-      // Only set to wallets if there's no saved page
-      if (!localStorage.getItem('lastVisitedPage')) {
-        setCurrentPage('wallets');
-        setActiveSection('wallets');
+      setShowUserInfoPage(false);
+      setOnboardingStep(0);
+    } else if (user || authUser) {
+      // User has logged in
+      if (!previousUser) {
+        setShowLandingPage(false);
+        // Only set to wallets if there's no saved page
+        if (!localStorage.getItem('lastVisitedPage')) {
+          setCurrentPage('wallets');
+          setActiveSection('wallets');
+        }
       }
     }
   }, [user, authUser]);
