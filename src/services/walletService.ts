@@ -1,13 +1,12 @@
 import { supabase } from '../supabaseClient';
 import { Wallet } from '../types';
 
-class WalletService {
-  async getUserWallets(userId: string): Promise<Wallet[]> {
+export class WalletService {
+  async getWallets(): Promise<Wallet[]> {
     try {
       const { data, error } = await supabase
         .from('wallets')
-        .select('*')
-        .eq('user_id', userId);
+        .select('*');
 
       if (error) throw error;
       return data as Wallet[] || [];
@@ -29,6 +28,21 @@ class WalletService {
       return data as Wallet;
     } catch (error) {
       console.error('Error adding wallet:', error);
+      throw error;
+    }
+  }
+
+  async getUserWallets(userId: string): Promise<Wallet[]> {
+    try {
+      const { data, error } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      return data as Wallet[] || [];
+    } catch (error) {
+      console.error('Error fetching wallets:', error);
       throw error;
     }
   }

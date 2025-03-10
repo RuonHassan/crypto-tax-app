@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { transactionService } from './services/transactionService';
 import { walletService } from './services/walletService';
-import priceService from './services/priceService';
+import { priceService } from './services/priceService';
 import { Transaction, Wallet } from './types';
 import { ApiError } from './utils/errors';
 import LandingPage from './components/LandingPage';
@@ -12,7 +12,7 @@ import WalletsPage from './components/WalletsPage';
 import AppLayout from './components/AppLayout';
 
 export default function AppWrapper() {
-    const { user } = useAuth();
+    const { user, signIn } = useAuth();
     const [currentPage, setCurrentPage] = useState<string>('wallets');
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -33,12 +33,54 @@ export default function AppWrapper() {
         walletNames: [] as string[]
     });
 
+    // Fetch transactions for all wallets
+    const fetchTransactions = useCallback(async () => {
+        if (!user?.id || wallets.length === 0) return;
+
+        setLoading(true);
+        setError(null);
+        try {
+            const allTransactions: Transaction[] = [];
+            setLoadingProgress({ status: 'Loading transactions...', progress: 0 });
+
+            for (let i = 0; i < wallets.length; i++) {
+                const wallet = wallets[i];
+                try {
+                    const walletTransactions = await transactionService.getUserTransactions(wallet.id);
+                    allTransactions.push(...walletTransactions);
+                } catch (err) {
+                    console.error(`Failed to fetch transactions for wallet ${wallet.wallet_address}:`, err);
+                }
+                setLoadingProgress({
+                    status: 'Loading transactions...',
+                    progress: ((i + 1) / wallets.length) * 100
+                });
+            }
+
+            // Sort transactions by block_time in descending order
+            allTransactions.sort((a, b) => {
+                const dateA = new Date(a.block_time);
+                const dateB = new Date(b.block_time);
+                return dateB.getTime() - dateA.getTime();
+            });
+
+            setTransactions(allTransactions);
+        } catch (error) {
+            console.error('Failed to fetch transactions:', error);
+            setError('Failed to load transactions. Please try again.');
+        } finally {
+            setLoading(false);
+            setLoadingProgress({ status: '', progress: 0 });
+        }
+    }, [user?.id, wallets]);
+
     // Fetch user's wallets
     const fetchWallets = useCallback(async () => {
         if (!user?.id) return;
 
+        setLoading(true);
+        setError(null);
         try {
-            setLoading(true);
             const userWallets = await walletService.getUserWallets(user.id);
             setWallets(userWallets);
             
@@ -47,13 +89,16 @@ export default function AppWrapper() {
                 walletAddresses: userWallets.map(w => w.wallet_address),
                 walletNames: userWallets.map(w => w.wallet_name)
             });
+
+            // After fetching wallets, fetch transactions
+            await fetchTransactions();
         } catch (error) {
             console.error('Failed to fetch wallets:', error);
             setError('Failed to fetch wallets. Please try again.');
         } finally {
             setLoading(false);
         }
-    }, [user?.id]);
+    }, [user?.id, fetchTransactions]);
 
     // Add wallet
     const addWallet = async (address: string, name: string = '') => {
@@ -67,6 +112,9 @@ export default function AppWrapper() {
                 network: 'solana'
             });
             setWallets(prev => [...prev, wallet]);
+            
+            // Fetch transactions for the new wallet
+            await fetchTransactions();
         } catch (error) {
             console.error('Failed to add wallet:', error);
             throw error;
@@ -78,6 +126,8 @@ export default function AppWrapper() {
         try {
             await walletService.deleteWallet(walletId);
             setWallets(prev => prev.filter(w => w.id !== walletId));
+            // Refresh transactions after deleting wallet
+            await fetchTransactions();
         } catch (error) {
             console.error('Failed to delete wallet:', error);
             throw error;
@@ -87,9 +137,13 @@ export default function AppWrapper() {
     // Handle navigation
     const handleNavigate = (page: string) => {
         setCurrentPage(page);
+        // Refresh data when navigating to dashboard
+        if (page === 'dashboard') {
+            fetchTransactions();
+        }
     };
 
-    // Load wallets on mount
+    // Load wallets and transactions on mount
     useEffect(() => {
         if (user) {
             fetchWallets();
@@ -97,7 +151,7 @@ export default function AppWrapper() {
     }, [user, fetchWallets]);
 
     if (!user) {
-        return <LandingPage onGetStarted={() => {}} />;
+        return <LandingPage onGetStarted={() => signIn()} />;
     }
 
     return (
@@ -147,20 +201,22 @@ export default function AppWrapper() {
             {currentPage === 'dashboard' && (
                 <TransactionDashboard
                     transactions={transactions}
+                    wallets={wallets}
+                    onRefresh={fetchTransactions}
                     selectedWallet="all"
                     walletMap={Object.fromEntries(wallets.map(w => [w.wallet_address, w.wallet_name]))}
                     walletAddresses={wallets.map(w => w.wallet_address)}
                     walletNames={wallets.map(w => w.wallet_name)}
-                    onWalletSelect={() => {}}
+                    onWalletSelect={() => fetchTransactions()}
                     loading={loading}
                     batchProgress={{
-                        totalTransactions: 0,
-                        processedTransactions: 0,
-                        currentBatch: 0,
-                        isComplete: true
+                        totalTransactions: transactions.length,
+                        processedTransactions: transactions.length,
+                        currentBatch: 1,
+                        isComplete: !loading
                     }}
                     walletProcessingStatus={walletProcessingStatus}
-                    queueWalletForProcessing={async () => {}}
+                    queueWalletForProcessing={async () => fetchTransactions()}
                     validateWalletAddress={(address: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)}
                 />
             )}

@@ -1,0 +1,141 @@
+/* Modern Card Styles */
+.card {
+    @apply bg-white dark:bg-geist-accent-800 
+           rounded-2xl 
+           border border-geist-accent-200/30 dark:border-geist-accent-700/30
+           shadow-sm hover:shadow-md
+           transition-all duration-300
+           backdrop-blur-sm
+           bg-opacity-95 dark:bg-opacity-95;
+}
+
+/* Glassmorphism Effect */
+.glass {
+    @apply bg-white/80 dark:bg-geist-accent-800/80
+           backdrop-blur-md
+           border border-white/20 dark:border-geist-accent-700/20
+           shadow-xl;
+}
+
+/* Modern Button Styles */
+.btn {
+    @apply px-4 py-2
+           rounded-xl
+           font-medium
+           transition-all duration-200
+           transform hover:scale-[1.02]
+           active:scale-[0.98]
+           disabled:opacity-50
+           disabled:cursor-not-allowed
+           disabled:transform-none;
+}
+
+.btn-primary {
+    @apply bg-gradient-to-r from-geist-success to-blue-500
+           hover:from-geist-success hover:to-blue-600
+           text-white
+           shadow-sm hover:shadow-md
+           active:shadow-sm;
+}
+
+.btn-secondary {
+    @apply bg-geist-accent-100 dark:bg-geist-accent-700
+           text-geist-accent-900 dark:text-geist-accent-100
+           hover:bg-geist-accent-200 dark:hover:bg-geist-accent-600;
+}
+
+/* Input Styles */
+.input {
+    @apply w-full
+           px-4 py-3
+           bg-white dark:bg-geist-accent-800
+           border border-geist-accent-200/50 dark:border-geist-accent-700/50
+           rounded-xl
+           focus:ring-2 focus:ring-geist-success/50 focus:border-geist-success
+           transition-all duration-200
+           placeholder-geist-accent-400;
+}
+
+/* Badge Styles */
+.badge {
+    @apply inline-flex items-center
+           px-2.5 py-0.5
+           rounded-full
+           text-xs font-medium
+           transition-all duration-200;
+}
+
+.badge-success {
+    @apply bg-green-100/80 dark:bg-green-900/30
+           text-green-800 dark:text-green-300;
+}
+
+.badge-warning {
+    @apply bg-orange-100/80 dark:bg-orange-900/30
+           text-orange-800 dark:text-orange-300;
+}
+
+/* Progress Bar */
+.progress {
+    @apply w-full
+           bg-geist-accent-100 dark:bg-geist-accent-700
+           rounded-full
+           overflow-hidden;
+}
+
+.progress-bar {
+    @apply bg-geist-success
+           h-full
+           rounded-full
+           transition-all duration-500;
+}
+
+/* Table Styles */
+.table-container {
+    @apply overflow-x-auto
+           rounded-xl
+           border border-geist-accent-200/30 dark:border-geist-accent-700/30;
+}
+
+.table {
+    @apply min-w-full
+           divide-y divide-geist-accent-200/50 dark:divide-geist-accent-700/50;
+}
+
+.table th {
+    @apply px-4 py-3
+           text-left
+           text-xs font-medium
+           text-geist-accent-600 dark:text-geist-accent-400
+           uppercase tracking-wider
+           bg-geist-accent-50/50 dark:bg-geist-accent-800/50;
+}
+
+.table td {
+    @apply px-4 py-3
+           whitespace-nowrap
+           text-sm
+           text-geist-accent-900 dark:text-geist-accent-100
+           bg-white dark:bg-geist-accent-800;
+}
+
+/* Animation Classes */
+.hover-lift {
+    @apply transition-transform duration-200
+           hover:-translate-y-0.5;
+}
+
+.hover-glow {
+    @apply transition-all duration-200
+           hover:shadow-lg hover:shadow-geist-success/10;
+}
+
+/* Stat Card */
+.stat-card {
+    @apply p-4
+           bg-geist-accent-50/50 dark:bg-geist-accent-700/50
+           rounded-xl
+           backdrop-blur-sm
+           hover:bg-geist-accent-50/80 dark:hover:bg-geist-accent-700/80
+           transition-all duration-200;
+} 

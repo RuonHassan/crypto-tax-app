@@ -13,6 +13,10 @@ export interface Transaction {
     raw_data: string;
     created_at: Date;
     updated_at: Date;
+    wallet_address: string;
+    destination_address?: string;
+    is_internal_transfer?: boolean;
+    destination_wallet_id?: string;
 }
 
 export interface Wallet {

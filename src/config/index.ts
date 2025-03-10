@@ -58,7 +58,11 @@ const validateConfig = () => {
 try {
     validateConfig();
 } catch (error) {
-    console.error('Configuration Error:', error.message);
+    if (error instanceof Error) {
+        console.error('Configuration Error:', error.message);
+    } else {
+        console.error('Configuration Error:', error);
+    }
     // In development, we might want to continue with missing vars
     if (process.env.NODE_ENV === 'production') {
         throw error;

@@ -1,4 +1,4 @@
-class PriceService {
+export class PriceService {
   private cache: { [key: string]: { price: number; timestamp: number } } = {};
   private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
@@ -34,4 +34,4 @@ class PriceService {
   }
 }
 
-export default new PriceService(); 
+export const priceService = new PriceService(); 

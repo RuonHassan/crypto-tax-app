@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { Transaction } from '../types';
 
-class TransactionService {
+export class TransactionService {
   async getUserTransactions(userId: string): Promise<Transaction[]> {
     try {
       const { data, error } = await supabase
@@ -31,6 +31,11 @@ class TransactionService {
       console.error('Error saving transaction:', error);
       throw error;
     }
+  }
+
+  async processTransactions(transactions: Transaction[]): Promise<Transaction[]> {
+    // TODO: Implement transaction processing logic
+    return transactions;
   }
 }
 

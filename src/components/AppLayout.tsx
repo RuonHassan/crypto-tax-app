@@ -72,7 +72,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
             toggleUserInfoPage={toggleUserInfoPage}
             currentPage={currentPage}
             userProfile={userProfile}
-            onNavigate={(page) => {
+            onNavigate={(page: string) => {
               onNavigate(page);
               setIsMobileMenuOpen(false);
             }}
