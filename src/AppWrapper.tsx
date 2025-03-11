@@ -18,6 +18,7 @@ export default function AppWrapper() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
+    const [selectedWallet, setSelectedWallet] = useState<string>('all');
     const [loadingProgress, setLoadingProgress] = useState({
         status: '',
         progress: 0
@@ -35,28 +36,37 @@ export default function AppWrapper() {
 
     // Fetch transactions for all wallets
     const fetchTransactions = useCallback(async () => {
-        if (!user?.id || wallets.length === 0) return;
+        if (!user?.id || wallets.length === 0) {
+            console.log('No user or wallets to fetch transactions for');
+            return;
+        }
 
         setLoading(true);
         setError(null);
         try {
             const allTransactions: Transaction[] = [];
             setLoadingProgress({ status: 'Loading transactions...', progress: 0 });
+            console.log('Starting to fetch transactions for', wallets.length, 'wallets');
 
-            for (let i = 0; i < wallets.length; i++) {
-                const wallet = wallets[i];
+            const walletsToFetch = selectedWallet === 'all' ? wallets : wallets.filter(w => w.wallet_address === selectedWallet);
+            
+            for (let i = 0; i < walletsToFetch.length; i++) {
+                const wallet = walletsToFetch[i];
                 try {
-                    const walletTransactions = await transactionService.getUserTransactions(wallet.id);
+                    console.log(`Fetching transactions for wallet ${wallet.wallet_name || wallet.wallet_address} (${wallet.id})`);
+                    const walletTransactions = await transactionService.getWalletTransactions(wallet.id);
+                    console.log(`Found ${walletTransactions.length} transactions for wallet ${wallet.wallet_name || wallet.wallet_address}`);
                     allTransactions.push(...walletTransactions);
                 } catch (err) {
                     console.error(`Failed to fetch transactions for wallet ${wallet.wallet_address}:`, err);
                 }
                 setLoadingProgress({
-                    status: 'Loading transactions...',
-                    progress: ((i + 1) / wallets.length) * 100
+                    status: `Loading transactions for ${wallet.wallet_name || wallet.wallet_address}...`,
+                    progress: ((i + 1) / walletsToFetch.length) * 100
                 });
             }
 
+            console.log('Total transactions found:', allTransactions.length);
             // Sort transactions by block_time in descending order
             allTransactions.sort((a, b) => {
                 const dateA = new Date(a.block_time);
@@ -72,7 +82,7 @@ export default function AppWrapper() {
             setLoading(false);
             setLoadingProgress({ status: '', progress: 0 });
         }
-    }, [user?.id, wallets]);
+    }, [user?.id, wallets, selectedWallet]);
 
     // Fetch user's wallets
     const fetchWallets = useCallback(async () => {
@@ -81,7 +91,9 @@ export default function AppWrapper() {
         setLoading(true);
         setError(null);
         try {
+            console.log('Fetching wallets for user:', user.id);
             const userWallets = await walletService.getUserWallets(user.id);
+            console.log('Fetched wallets:', userWallets);
             setWallets(userWallets);
             
             // Update formData with wallet information
@@ -203,11 +215,14 @@ export default function AppWrapper() {
                     transactions={transactions}
                     wallets={wallets}
                     onRefresh={fetchTransactions}
-                    selectedWallet="all"
+                    selectedWallet={selectedWallet}
                     walletMap={Object.fromEntries(wallets.map(w => [w.wallet_address, w.wallet_name]))}
                     walletAddresses={wallets.map(w => w.wallet_address)}
                     walletNames={wallets.map(w => w.wallet_name)}
-                    onWalletSelect={() => fetchTransactions()}
+                    onWalletSelect={(wallet: string) => {
+                        setSelectedWallet(wallet);
+                        fetchTransactions();
+                    }}
                     loading={loading}
                     batchProgress={{
                         totalTransactions: transactions.length,

@@ -6,11 +6,11 @@ interface TransactionDashboardProps {
     transactions: Transaction[];
     wallets: Wallet[];
     onRefresh: () => Promise<void>;
-    selectedWallet?: string;
+    selectedWallet: string;
     walletMap?: { [key: string]: string };
     walletAddresses?: string[];
     walletNames?: string[];
-    onWalletSelect?: () => void;
+    onWalletSelect: (wallet: string) => void;
     loading?: boolean;
     batchProgress?: {
         totalTransactions: number;
@@ -31,11 +31,19 @@ interface TransactionDashboardProps {
 export default function TransactionDashboard({
     transactions,
     wallets,
-    onRefresh
+    onRefresh,
+    selectedWallet,
+    walletMap = {},
+    walletAddresses = [],
+    walletNames = [],
+    onWalletSelect,
+    loading = false,
+    batchProgress,
+    walletProcessingStatus,
+    queueWalletForProcessing,
+    validateWalletAddress
 }: TransactionDashboardProps) {
-    const [selectedWallet, setSelectedWallet] = useState<string>('all');
     const [selectedType, setSelectedType] = useState<TransactionType | 'all'>('all');
-    const [loading, setLoading] = useState(false);
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter(tx => {
@@ -59,12 +67,15 @@ export default function TransactionDashboard({
     }, [filteredTransactions]);
 
     const handleRefresh = async () => {
-        setLoading(true);
         try {
             await onRefresh();
-        } finally {
-            setLoading(false);
+        } catch (error) {
+            console.error('Error refreshing transactions:', error);
         }
+    };
+
+    const handleWalletSelect = (wallet: string) => {
+        onWalletSelect(wallet);
     };
 
     return (
@@ -125,7 +136,7 @@ export default function TransactionDashboard({
                                 <select
                                     id="wallet"
                                     value={selectedWallet}
-                                    onChange={(e) => setSelectedWallet(e.target.value)}
+                                    onChange={(e) => handleWalletSelect(e.target.value)}
                                     className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                 >
                                     <option value="all">All Wallets</option>
