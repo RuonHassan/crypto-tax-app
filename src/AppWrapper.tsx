@@ -7,9 +7,9 @@ import { Transaction, Wallet } from './types';
 import { ApiError } from './utils/errors';
 import LandingPage from './components/LandingPage';
 import UserInformationPage from './components/UserInformationPage';
-import TransactionDashboard from './components/TransactionDashboard';
+import TransactionDashboard from './components/TransactionDashboard.js';
 import WalletsPage from './components/WalletsPage';
-import AppLayout from './components/AppLayout';
+import AppLayout from './components/AppLayout.js';
 
 export default function AppWrapper() {
     const { user, signIn } = useAuth();
@@ -242,21 +242,18 @@ export default function AppWrapper() {
             {currentPage === 'dashboard' && (
                 <TransactionDashboard
                     transactions={transactions}
-                    wallets={wallets}
-                    onRefresh={() => fetchTransactions(true, 0)}
                     selectedWallet={selectedWallet}
                     walletMap={Object.fromEntries(wallets.map(w => [w.wallet_address, w.wallet_name]))}
                     walletAddresses={wallets.map(w => w.wallet_address)}
                     walletNames={wallets.map(w => w.wallet_name)}
                     onWalletSelect={setSelectedWallet}
                     loading={loading}
-                    hasMore={hasMore}
-                    onLoadMore={loadMore}
+                    onLoadTransactions={() => fetchTransactions(true, 0)}
                     batchProgress={{
                         totalTransactions: transactions.length,
                         processedTransactions: transactions.length,
                         currentBatch: currentTransactionPage + 1,
-                        isComplete: !loading && !hasMore
+                        isComplete: !loading
                     }}
                     walletProcessingStatus={walletProcessingStatus}
                     queueWalletForProcessing={async () => fetchTransactions(true, 0)}
