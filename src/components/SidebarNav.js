@@ -5,19 +5,18 @@ import { useNavigate } from 'react-router-dom';
 const SidebarNav = ({ 
   toggleUserInfoPage, 
   currentPage = 'dashboard',
-  userProfile = {},
   onNavigate
 }) => {
-  const { user, signOut } = useAuth();
+  const { user, userProfile, signOut } = useAuth();
   const navigate = useNavigate();
   
   // Get user display name - use name if available, otherwise email
   const getDisplayName = () => {
-    if (userProfile?.firstName && userProfile?.lastName) {
-      return `${userProfile.firstName} ${userProfile.lastName}`;
+    if (userProfile?.first_name && userProfile?.last_name) {
+      return `${userProfile.first_name} ${userProfile.last_name}`;
     } 
-    else if (userProfile?.firstName) {
-      return userProfile.firstName;
+    else if (userProfile?.first_name) {
+      return userProfile.first_name;
     }
     return user?.email || 'User';
   };

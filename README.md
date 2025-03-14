@@ -25,21 +25,37 @@ A modern, user-friendly application that simplifies crypto tax calculations, ana
 
 ## 🔧 Installation
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/crypto-tax-app.git
-   cd crypto-tax-app
-   ```
+### Prerequisites
+- Node.js 18.x (LTS)
+- npm 10.x
+- [nvm](https://github.com/nvm-sh/nvm) (recommended)
+
+### Installation
+
+1. Use the correct Node version:
+```bash
+nvm install
+nvm use
+```
 
 2. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+# Clean install with forced resolution
+npm cache clean --force
+npm install --force
+```
 
 3. Start the development server:
-   ```bash
-   npm start
-   ```
+```bash
+npm start
+```
+
+### Troubleshooting
+
+If you encounter dependency issues:
+1. Delete `node_modules` and `package-lock.json`
+2. Clear npm cache: `npm cache clean --force`
+3. Reinstall dependencies: `npm install --force`
 
 4. The application will open in your browser at `http://localhost:3000`
 

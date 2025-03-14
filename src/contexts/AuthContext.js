@@ -10,7 +10,26 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState(null);
   const navigate = useNavigate();
+
+  // Function to fetch user profile
+  const fetchUserProfile = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) throw error;
+      setUserProfile(data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      return null;
+    }
+  };
 
   useEffect(() => {
     // Get session from supabase
@@ -21,6 +40,12 @@ export const AuthProvider = ({ children }) => {
       }
       setSession(session);
       setUser(session?.user ?? null);
+      
+      // Fetch user profile if user exists
+      if (session?.user) {
+        await fetchUserProfile(session.user.id);
+      }
+      
       setLoading(false);
     };
 
@@ -28,9 +53,17 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
+        
+        // Fetch user profile if user exists
+        if (session?.user) {
+          await fetchUserProfile(session.user.id);
+        } else {
+          setUserProfile(null);
+        }
+        
         setLoading(false);
       }
     );
@@ -42,11 +75,29 @@ export const AuthProvider = ({ children }) => {
   // Sign up function
   const signUp = async (email, password) => {
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
       });
       if (error) throw error;
+      
+      // Create initial profile record
+      if (data?.user) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert([{
+            id: data.user.id,
+            first_name: '',
+            last_name: '',
+            created_at: new Date().toISOString(),
+            is_new_user: true
+          }]);
+          
+        if (profileError) {
+          console.error('Error creating profile:', profileError);
+        }
+      }
+      
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -120,6 +171,8 @@ export const AuthProvider = ({ children }) => {
     user,
     session,
     loading,
+    userProfile,
+    fetchUserProfile,
     signUp,
     signIn,
     signOut,

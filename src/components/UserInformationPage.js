@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { updateUserProfile } from '../services/databaseService';
 
@@ -8,9 +8,20 @@ const UserInformationPage = ({
   handleInputChange,
   goBackToDashboard
 }) => {
-  const { user } = useAuth();
+  const { user, userProfile, fetchUserProfile } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [localFormData, setLocalFormData] = useState(formData);
+
+  // Initialize local form data from userProfile when it's loaded
+  useEffect(() => {
+    if (userProfile) {
+      setLocalFormData(prev => ({
+        ...prev,
+        firstName: userProfile.first_name || '',
+        lastName: userProfile.last_name || '',
+      }));
+    }
+  }, [userProfile]);
 
   const handleLocalInputChange = (e) => {
     const { name, value } = e.target;
@@ -36,6 +47,9 @@ const UserInformationPage = ({
       if (!success) {
         throw error || new Error('Failed to update profile');
       }
+
+      // Refresh the profile in the context
+      await fetchUserProfile(user.id);
 
       // Update the parent state
       setFormData(prev => ({

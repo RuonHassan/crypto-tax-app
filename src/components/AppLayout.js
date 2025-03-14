@@ -70,7 +70,6 @@ const AppLayout = ({
           <SidebarNav
             toggleUserInfoPage={toggleUserInfoPage}
             currentPage={currentPage}
-            userProfile={userProfile}
             onNavigate={(page) => {
               onNavigate(page);
               setIsMobileMenuOpen(false);
@@ -88,7 +87,6 @@ const AppLayout = ({
           <SidebarNav
             toggleUserInfoPage={toggleUserInfoPage}
             currentPage={currentPage}
-            userProfile={userProfile}
             onNavigate={onNavigate}
           />
         </div>

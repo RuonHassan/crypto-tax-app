@@ -10,9 +10,10 @@ import UserInformationPage from './components/UserInformationPage';
 import TransactionDashboard from './components/TransactionDashboard.js';
 import WalletsPage from './components/WalletsPage';
 import AppLayout from './components/AppLayout.js';
+import OnboardingFlow from './components/onboarding/OnboardingFlow';
 
 export default function AppWrapper() {
-    const { user, signIn } = useAuth();
+    const { user, userProfile, signIn } = useAuth();
     const [currentPage, setCurrentPage] = useState<string>('wallets');
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -190,6 +191,12 @@ export default function AppWrapper() {
         return transactions.some(tx => tx.wallet_address === walletAddress);
     };
 
+    // Render onboarding flow for new users
+    if (user && userProfile && userProfile.is_new_user === true) {
+        return <OnboardingFlow />;
+    }
+    
+    // Show landing page for non-authenticated users
     if (!user) {
         return <LandingPage onGetStarted={() => signIn()} />;
     }
