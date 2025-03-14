@@ -3,6 +3,23 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { TRANSACTION_TYPES, categorizeTransaction, DEX_PROGRAMS } from '../utils/transactionUtils';
 import { Spinner, Progress, Toggle } from '@geist-ui/core';
 
+// LoadTransactionButton component
+const LoadTransactionButton = ({ onClick }) => {
+  return (
+    <div className="flex justify-center py-4">
+      <button 
+        onClick={onClick}
+        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors flex items-center gap-2"
+      >
+        <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+        </svg>
+        Load All Transactions
+      </button>
+    </div>
+  );
+};
+
 // Utility function to shorten wallet addresses
 const shortenAddress = (address) => {
   if (!address) return '';
@@ -74,7 +91,8 @@ const TransactionDashboard = ({
   batchProgress,
   walletProcessingStatus,
   queueWalletForProcessing,
-  validateWalletAddress
+  validateWalletAddress,
+  onLoadTransactions
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
@@ -229,14 +247,27 @@ const TransactionDashboard = ({
       {loading && (
         <div className="text-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-geist-success mx-auto mb-4"></div>
-          <p className="text-geist-accent-700 dark:text-geist-accent-300">
-            Loading transactions...
+          <p className="text-geist-accent-700 dark:text-geist-accent-300 font-medium">
+            Loading all transactions...
+          </p>
+          <p className="text-geist-accent-600 dark:text-geist-accent-400 text-sm mt-2">
+            This may take a few minutes for large wallets.
           </p>
           {batchProgress && (
             <div className="mt-2 text-sm text-geist-accent-600 dark:text-geist-accent-400">
               Processed {batchProgress.processedTransactions} of {batchProgress.totalTransactions} transactions
             </div>
           )}
+        </div>
+      )}
+      
+      {/* No Transactions State */}
+      {!loading && transactions.length === 0 && (
+        <div className="text-center py-8">
+          <p className="text-geist-accent-700 dark:text-geist-accent-300 mb-4">
+            No transactions found for the selected wallet.
+          </p>
+          <LoadTransactionButton onClick={onLoadTransactions || (() => window.location.reload())} />
         </div>
       )}
 

@@ -76,89 +76,16 @@ const rpcThrottler = (() => {
   };
 })();
 
-function DarkModeToggle() {
-  const [darkMode, setDarkMode] = useState(true);
-
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
-
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
-
-  return (
-    <button
-      onClick={() => setDarkMode(!darkMode)}
-      className="fixed top-4 right-4 p-2 rounded-lg bg-geist-accent-200 dark:bg-geist-accent-700 hover:opacity-90 transition-all"
-    >
-      {darkMode ? '🌞' : '🌙'}
-    </button>
-  );
-}
-
-function WalletInputs({ walletAddresses, onChange }) {
-  const addWallet = () => {
-    onChange([...walletAddresses, '']);
-  };
-
-  const removeWallet = (index) => {
-    const updated = walletAddresses.filter((_, i) => i !== index);
-    onChange(updated);
-  };
-
-  const updateWallet = (index, value) => {
-    const updated = walletAddresses.map((addr, i) => 
-      i === index ? value : addr
-    );
-    onChange(updated);
-  };
-
-  return (
-    <div className="space-y-4">
-      {walletAddresses.map((address, index) => (
-        <div key={index} className="flex gap-2">
-          <input
-            type="text"
-            value={address}
-            onChange={(e) => updateWallet(index, e.target.value)}
-            className="input"
-            placeholder="Solana Wallet Address"
-          />
-          {index > 0 && (
-            <button
-              onClick={() => removeWallet(index)}
-              className="btn btn-secondary"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-      ))}
-      <button onClick={addWallet} className="btn btn-primary">
-        Add Wallet
-      </button>
-    </div>
-  );
-}
-
-// Add validateConnection function before the App component
+// Add this before the App component
 const validateConnection = async () => {
   try {
-    if (!HELIUS_RPC_URL) {
-      throw new Error('Helius RPC URL not configured');
-    }
-
+    console.log('Validating Solana connection...');
     const connection = new Connection(HELIUS_RPC_URL);
     const blockHeight = await connection.getBlockHeight();
-    console.log(`Connection validated successfully. Block height: ${blockHeight}`);
+    console.log('Connection validated, current block height:', blockHeight);
     return true;
   } catch (error) {
-    console.error('Connection validation failed:', error);
+    console.error('Failed to validate Solana connection:', error);
     return false;
   }
 };
@@ -324,6 +251,12 @@ function App({ user }) {
               completedWallets: prev.completedWallets.filter(addr => addr !== walletAddress)
             };
           });
+          
+          // Reset wallet transaction cache status to trigger a recheck
+          setWalletsWithTransactions(prev => ({
+            ...prev,
+            [walletAddress]: undefined
+          }));
           
           return Promise.resolve();
         } catch (error) {
@@ -2375,12 +2308,21 @@ function App({ user }) {
   // Add this near the other state declarations in the App component
   const [dbTransactions, setDbTransactions] = useState([]);
   
+  // Add state to cache whether wallets have transactions
+  const [walletsWithTransactions, setWalletsWithTransactions] = useState({});
+  
+  // Add these near the other state declarations
+  const [transactionPage, setTransactionPage] = useState(0);
+  const [hasMoreTransactions, setHasMoreTransactions] = useState(true);
+  const [loadingMoreTransactions, setLoadingMoreTransactions] = useState(false);
+
   // Add this function to load transactions from the database
   const loadTransactionsFromDatabase = async () => {
     if (!authUser) return;
     
     try {
-      console.log('Loading transactions from database...');
+      console.log(`Loading all transactions from database - this may take a few minutes...`);
+      setLoadingTransactions(true);
       
       // First get all user's wallets
       const { data: wallets, error: walletsError } = await supabase
@@ -2392,45 +2334,65 @@ function App({ user }) {
       
       if (!wallets || wallets.length === 0) {
         console.log('No wallets found for user');
+        setTransactions([]);
+        setDbTransactions([]);
+        setLoadingTransactions(false);
         return;
       }
       
       const walletIds = wallets.map(w => w.id);
-      
-      // Get all transactions for these wallets
-      const { data: transactions, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .in('wallet_id', walletIds)
-        .order('block_time', { ascending: false });
-        
-      if (error) throw error;
-      
-      console.log(`Found ${transactions?.length || 0} transactions in database`);
-      
-      if (!transactions || transactions.length === 0) {
-        setTransactions([]);
-        setDbTransactions([]);
-        return;
-      }
       
       // Create a map of wallet_id to wallet_address
       const walletAddressMap = Object.fromEntries(
         wallets.map(w => [w.id, w.wallet_address])
       );
       
+      // Initialize transaction status cache for each wallet
+      await Promise.all(wallets.map(async wallet => {
+        // Check if wallet has any transactions if not in cache
+        if (walletsWithTransactions[wallet.wallet_address] === undefined) {
+          const hasTransactions = await checkWalletHasTransactions(wallet.wallet_address);
+          
+          // Update cache
+          setWalletsWithTransactions(prev => ({
+            ...prev,
+            [wallet.wallet_address]: hasTransactions
+          }));
+        }
+      }));
+      
+      // Get all transactions for these wallets with limited columns
+      const { data: transactions, error, count } = await supabase
+        .from('transactions')
+        .select(`
+          id, 
+          wallet_id, 
+          signature, 
+          block_time, 
+          success, 
+          fee, 
+          transaction_type, 
+          amount, 
+          usd_value, 
+          token_symbol, 
+          token_address
+        `, { count: 'exact' })
+        .in('wallet_id', walletIds)
+        .order('block_time', { ascending: false });
+        
+      if (error) throw error;
+      
+      console.log(`Found ${transactions?.length || 0} transactions (total: ${count || 'unknown'})`);
+      
+      if (!transactions || transactions.length === 0) {
+        setTransactions([]);
+        setDbTransactions([]);
+        setLoadingTransactions(false);
+        return;
+      }
+      
       // Transform transactions to match the expected format
       const formattedTransactions = transactions.map(tx => {
-        // Parse the raw data if it exists
-        let rawData = {};
-        try {
-          if (tx.raw_data) {
-            rawData = JSON.parse(tx.raw_data);
-          }
-        } catch (e) {
-          console.error('Error parsing raw data:', e);
-        }
-        
         return {
           signature: tx.signature,
           timestamp: new Date(tx.block_time).getTime() / 1000,
@@ -2445,23 +2407,132 @@ function App({ user }) {
             symbol: tx.token_symbol,
             address: tx.token_address
           } : null,
-          rawData: rawData
+          rawData: {} // No raw data in initial load - will be loaded on demand
         };
       });
       
       console.log(`Formatted ${formattedTransactions.length} transactions for display`);
       
-      // Update both transaction states
+      // Update transaction state
       setTransactions(formattedTransactions);
       setDbTransactions(formattedTransactions);
     } catch (error) {
       console.error('Error loading transactions from database:', error);
+    } finally {
+      setLoadingTransactions(false);
+    }
+  };
+
+  // Function to load more transactions
+  const loadMoreTransactions = async () => {
+    if (loadingMoreTransactions || !hasMoreTransactions) return;
+    
+    const nextPage = transactionPage + 1;
+    await loadTransactionsFromDatabase(nextPage);
+  };
+
+  // Function to check if a wallet has any transactions in our database
+  const hasWalletTransactions = (walletAddress) => {
+    // Check cache first
+    if (walletsWithTransactions[walletAddress] !== undefined) {
+      return walletsWithTransactions[walletAddress];
+    }
+    // Fall back to checking dbTransactions state
+    return dbTransactions.some(tx => tx.walletAddress === walletAddress);
+  };
+  
+  // Function to efficiently check if a wallet has any transactions in the database
+  const checkWalletHasTransactions = async (walletAddress) => {
+    try {
+      // Skip if already in cache
+      if (walletsWithTransactions[walletAddress] !== undefined) {
+        return walletsWithTransactions[walletAddress];
+      }
+      
+      // Get wallet ID from address
+      const { data: wallet } = await supabase
+        .from('wallets')
+        .select('id')
+        .eq('wallet_address', walletAddress)
+        .single();
+      
+      if (!wallet) return false;
+      
+      // Check if wallet has any transactions (only need count)
+      const { count, error } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('wallet_id', wallet.id)
+        .limit(1);
+        
+      const hasTransactions = count > 0;
+      
+      // Update cache
+      setWalletsWithTransactions(prev => ({
+        ...prev,
+        [walletAddress]: hasTransactions
+      }));
+      
+      return hasTransactions;
+    } catch (error) {
+      console.error('Error checking wallet transactions:', error);
+      return false;
     }
   };
   
-  // Add an effect to load transactions when the component mounts or when wallets change
+  // Function to load transaction details (raw data) on demand
+  const loadTransactionDetails = async (signature) => {
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('raw_data')
+        .eq('signature', signature)
+        .single();
+        
+      if (error) throw error;
+      
+      // Parse raw data
+      let rawData = {};
+      try {
+        if (data?.raw_data) {
+          rawData = JSON.parse(data.raw_data);
+        }
+      } catch (e) {
+        console.error('Error parsing raw data:', e);
+      }
+      
+      return rawData;
+    } catch (error) {
+      console.error('Error loading transaction details:', error);
+      return {};
+    }
+  };
+  
+  // Effect to load transactions when component mounts or wallets change
   useEffect(() => {
-    loadTransactionsFromDatabase();
+    // Check if wallet status needs updating
+    const updateWalletStatus = async () => {
+      if (formData.walletAddresses.length > 0) {
+        // Update transaction status cache for each wallet
+        await Promise.all(formData.walletAddresses.map(async (address) => {
+          if (walletsWithTransactions[address] === undefined) {
+            await checkWalletHasTransactions(address);
+          }
+        }));
+      }
+    };
+    
+    // Load transactions and update wallet status
+    const loadData = async () => {
+      // Reset pagination when dependencies change
+      setTransactionPage(0);
+      setHasMoreTransactions(true);
+      
+      await loadTransactionsFromDatabase(0);
+      await updateWalletStatus();
+    };
+    
+    loadData();
   }, [authUser, formData.walletAddresses, formData.walletNames]);
 
   // Effect to restore active section
@@ -2582,6 +2653,7 @@ function App({ user }) {
                   walletSaving={walletSaving}
                   activeWalletIndex={activeWalletIndex}
                   validateWalletAddress={validateWalletAddress}
+                  hasWalletTransactions={hasWalletTransactions}
                 />
               )}
               
@@ -2591,7 +2663,7 @@ function App({ user }) {
                   {backgroundProcessing.active && (
                     <div className="bg-white dark:bg-geist-accent-800 rounded-xl shadow-sm border border-geist-accent-200 dark:border-geist-accent-700 p-3 animate-fade-in">
                       <div className="flex items-center gap-3">
-                          <div className="flex-1">
+                        <div className="flex-1">
                           <p className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
                             Processing {walletMap[backgroundProcessing.walletAddress] || 'wallet'}
                           </p>
@@ -2605,9 +2677,9 @@ function App({ user }) {
                           </div>
                           <span className="text-xs text-geist-accent-500 dark:text-geist-accent-400 tabular-nums">
                             {backgroundProcessing.progress}%
-                                  </span>
-                            </div>
-                          </div>
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   )}
                   
@@ -2622,7 +2694,7 @@ function App({ user }) {
                             {formData.walletAddresses.filter(addr => addr.length >= 32).length} wallets
                           </span>
                         </div>
-                    </div>
+                      </div>
                 
                       <div className="divide-y divide-geist-accent-200 dark:divide-geist-accent-700">
                         {/* Total Balance */}
@@ -2634,15 +2706,15 @@ function App({ user }) {
                                 <svg className="animate-spin h-4 w-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
+                                </svg>
                               </div>
                             ) : (
                               <span className="text-base font-medium text-geist-success dark:text-green-300">
                                 {Object.values(walletBalances).reduce((sum, balance) => sum + balance, 0).toFixed(4)} SOL
                               </span>
                             )}
-                    </div>
-                  </div>
+                          </div>
+                        </div>
 
                         {/* Transaction Count */}
                         <div className="p-4">
@@ -2651,92 +2723,89 @@ function App({ user }) {
                             {loadingTransactions ? (
                               <div className="flex items-center justify-center h-6">
                                 <svg className="animate-spin h-4 w-4 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
                               </div>
-                      ) : (
+                            ) : (
                               <span className="text-base font-medium text-geist-accent-900 dark:text-geist-foreground">
                                 {transactions.length}
-                        </span>
-                      )}
-              </div>
-            </div>
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
                     {/* Desktop View */}
                     <div className="hidden lg:block p-6">
-                    <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Wallet Overview</h2>
+                      <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Wallet Overview</h2>
                       <div className="grid grid-cols-3 gap-8">
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                          {formData.walletAddresses.filter(addr => addr.length >= 32).length}
-                    </div>
-                        <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                          Connected Wallets
-                    </div>
-                    </div>
+                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
+                          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
+                            {formData.walletAddresses.filter(addr => addr.length >= 32).length}
+                          </div>
+                          <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                            Connected Wallets
+                          </div>
+                        </div>
 
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        {loadingBalances ? (
-                          <div className="flex items-center justify-center h-full">
-                            <svg className="animate-spin h-6 w-6 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                    </div>
-                        ) : (
-                          <>
-                            <div className="text-3xl font-bold text-geist-success dark:text-green-300 mb-2">
-                              {Object.values(walletBalances).reduce((sum, balance) => sum + balance, 0).toFixed(4)} SOL
-                    </div>
-                            <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                              Current Balance
-                  </div>
-                          </>
-                        )}
-                </div>
-
-                      <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
-                        <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
-                          {loadingTransactions ? (
-                            <div className="flex items-center justify-center">
-                              <svg className="animate-spin h-6 w-6 text-geist-accent-900 dark:text-geist-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
+                          {loadingBalances ? (
+                            <div className="flex items-center justify-center h-full">
+                              <svg className="animate-spin h-6 w-6 text-geist-success" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                               </svg>
-                    </div>
-                          ) : transactions.length}
-                    </div>
-                        <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
-                          Total Transactions
+                            </div>
+                          ) : (
+                            <>
+                              <div className="text-3xl font-bold text-geist-success dark:text-green-300 mb-2">
+                                {Object.values(walletBalances).reduce((sum, balance) => sum + balance, 0).toFixed(4)} SOL
+                              </div>
+                              <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                                Current Balance
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="p-4 bg-geist-accent-50 dark:bg-geist-accent-700 rounded-xl">
+                          <div className="text-3xl font-bold text-geist-accent-900 dark:text-geist-foreground mb-2">
+                            {loadingTransactions ? (
+                              <div className="flex items-center justify-center">
+                                <svg className="animate-spin h-6 w-6 text-geist-accent-900 dark:text-geist-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                              </div>
+                            ) : transactions.length}
                           </div>
-                    </div>
+                          <div className="text-sm text-geist-accent-600 dark:text-geist-accent-300">
+                            Total Transactions
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Transaction Dashboard */}
+                  {/* Transaction Dashboard */}
                   <div className="bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
                     <h2 className="text-xl font-bold mb-6 text-geist-accent-900 dark:text-geist-foreground">Transaction Dashboard</h2>
-                    
                     <TransactionDashboard 
-                      transactions={dbTransactions} 
+                      transactions={transactions} 
                       selectedWallet={selectedWallet}
                       walletMap={walletMap}
                       walletAddresses={formData.walletAddresses}
                       walletNames={formData.walletNames}
                       onWalletSelect={setSelectedWallet}
-                      loading={loading}
+                      loading={loadingTransactions}
                       batchProgress={batchProgress}
-                      walletProcessingStatus={walletProcessingStatus}
-                      queueWalletForProcessing={queueWalletForProcessing}
-                      validateWalletAddress={validateWalletAddress}
+                      onLoadTransactions={loadTransactionsFromDatabase}
                     />
-                      </div>
-                    </div>
-                  )}
+                  </div>
+                </div>
+              )}
 
               {activeSection === 'reports' && (
                 <div className="mt-6 bg-white dark:bg-geist-accent-800 rounded-2xl shadow-lg border border-geist-accent-200 dark:border-geist-accent-700 p-6 animate-fade-in">
@@ -2745,14 +2814,13 @@ function App({ user }) {
                     <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-sm rounded-full">
                       Coming Soon
                     </span>
-                    </div>
-
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 opacity-60">
                     {/* Reports content */}
+                  </div>
                 </div>
-              </div>
-            )}
-        </div>
+              )}
+            </div>
           )}
         </AppLayout>
       )}
@@ -2761,4 +2829,3 @@ function App({ user }) {
 }
 
 export default App;
-export { DarkModeToggle };

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import SidebarNav from './SidebarNav';
 import Logo from './Logo';
-import { DarkModeToggle } from '../App';
+import DarkModeToggle from './DarkModeToggle';
 
 const AppLayout = ({ 
   children, 

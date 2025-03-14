@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import SidebarNav from './SidebarNav';
 import Logo from './Logo';
-import { DarkModeToggle } from '../App';
+import DarkModeToggle from './DarkModeToggle';
 import { AppLayoutProps } from '../types';
 
 const AppLayout: React.FC<AppLayoutProps> = ({ 

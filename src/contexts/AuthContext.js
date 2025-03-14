@@ -77,8 +77,11 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setSession(null);
       
+      // Clear local storage
+      localStorage.clear();
+      
       // Navigate to landing page
-      navigate('/');
+      navigate('/', { replace: true });
       
       return { success: true };
     } catch (error) {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Transaction, Wallet, TransactionType } from '../types';
 import { groupTransactionsByDate, calculateDailyVolume, calculateTotalFees } from '../utils/transactionUtils';
 
@@ -12,6 +12,8 @@ interface TransactionDashboardProps {
     walletNames?: string[];
     onWalletSelect: (wallet: string) => void;
     loading?: boolean;
+    hasMore?: boolean;
+    onLoadMore?: () => Promise<void>;
     batchProgress?: {
         totalTransactions: number;
         processedTransactions: number;
@@ -38,12 +40,16 @@ export default function TransactionDashboard({
     walletNames = [],
     onWalletSelect,
     loading = false,
+    hasMore = false,
+    onLoadMore,
     batchProgress,
     walletProcessingStatus,
     queueWalletForProcessing,
     validateWalletAddress
 }: TransactionDashboardProps) {
     const [selectedType, setSelectedType] = useState<TransactionType | 'all'>('all');
+    const loadingRef = useRef<HTMLDivElement>(null);
+    const observer = useRef<IntersectionObserver | null>(null);
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter(tx => {
@@ -78,164 +84,137 @@ export default function TransactionDashboard({
         onWalletSelect(wallet);
     };
 
+    // Infinite scroll implementation
+    const lastTransactionElementRef = useCallback((node: HTMLDivElement | null) => {
+        if (loading) return;
+        
+        if (observer.current) observer.current.disconnect();
+        
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                onLoadMore?.();
+            }
+        });
+        
+        if (node) observer.current.observe(node);
+    }, [loading, hasMore, onLoadMore]);
+
     return (
-        <div className="space-y-6">
-            {/* Stats */}
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-                    <div className="px-4 py-5 sm:p-6">
-                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                            Total Transactions
-                        </dt>
-                        <dd className="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
-                            {stats.totalTransactions}
-                        </dd>
-                    </div>
+        <div className="flex flex-col space-y-4 p-4">
+            {/* Stats section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Total Transactions</h3>
+                    <p className="text-2xl">{stats.totalTransactions}</p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-                    <div className="px-4 py-5 sm:p-6">
-                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                            Total Volume
-                        </dt>
-                        <dd className="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
-                            {stats.totalVolume.toFixed(2)} SOL
-                        </dd>
-                    </div>
+                <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Total Volume</h3>
+                    <p className="text-2xl">${stats.totalVolume.toFixed(2)}</p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-                    <div className="px-4 py-5 sm:p-6">
-                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                            Total Fees
-                        </dt>
-                        <dd className="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
-                            {stats.totalFees.toFixed(4)} SOL
-                        </dd>
-                    </div>
+                <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Total Fees</h3>
+                    <p className="text-2xl">${stats.totalFees.toFixed(2)}</p>
                 </div>
-                <div className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg">
-                    <div className="px-4 py-5 sm:p-6">
-                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                            Average Daily Volume
-                        </dt>
-                        <dd className="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
-                            {stats.averageVolume.toFixed(2)} SOL
-                        </dd>
-                    </div>
+                <div className="bg-white p-4 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Average Daily Volume</h3>
+                    <p className="text-2xl">${stats.averageVolume.toFixed(2)}</p>
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div className="px-4 py-5 sm:p-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-col sm:flex-row sm:space-x-4">
-                            <div className="mb-4 sm:mb-0">
-                                <label htmlFor="wallet" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Wallet
-                                </label>
-                                <select
-                                    id="wallet"
-                                    value={selectedWallet}
-                                    onChange={(e) => handleWalletSelect(e.target.value)}
-                                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            {/* Filters section */}
+            <div className="flex flex-wrap gap-4 items-center bg-white p-4 rounded-lg shadow">
+                <select
+                    className="form-select"
+                    value={selectedWallet}
+                    onChange={(e) => handleWalletSelect(e.target.value)}
+                >
+                    <option value="all">All Wallets</option>
+                    {wallets.map((wallet) => (
+                        <option key={wallet.wallet_address} value={wallet.wallet_address}>
+                            {wallet.wallet_name || wallet.wallet_address}
+                        </option>
+                    ))}
+                </select>
+
+                <select
+                    className="form-select"
+                    value={selectedType}
+                    onChange={(e) => setSelectedType(e.target.value as TransactionType | 'all')}
+                >
+                    <option value="all">All Types</option>
+                    <option value="transfer">Transfer</option>
+                    <option value="swap">Swap</option>
+                    <option value="nft">NFT</option>
+                </select>
+
+                <button
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    onClick={handleRefresh}
+                    disabled={loading}
+                >
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+            </div>
+
+            {/* Transactions list */}
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">USD Value</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fee</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {filteredTransactions.map((transaction, index) => (
+                                <tr
+                                    key={transaction.signature}
+                                    ref={index === filteredTransactions.length - 1 ? lastTransactionElementRef : null}
                                 >
-                                    <option value="all">All Wallets</option>
-                                    {wallets.map((wallet) => (
-                                        <option key={wallet.id} value={wallet.wallet_address}>
-                                            {wallet.wallet_name || wallet.wallet_address.slice(0, 8)}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label htmlFor="type" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Transaction Type
-                                </label>
-                                <select
-                                    id="type"
-                                    value={selectedType}
-                                    onChange={(e) => setSelectedType(e.target.value as TransactionType | 'all')}
-                                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                                >
-                                    <option value="all">All Types</option>
-                                    {Object.values(TransactionType).map((type) => (
-                                        <option key={type} value={type}>
-                                            {type}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        {new Date(transaction.block_time).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">{transaction.transaction_type}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">{transaction.amount}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">${transaction.usd_value?.toFixed(2) || '0.00'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">${transaction.fee?.toFixed(4) || '0.0000'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                            transaction.success
+                                                ? 'bg-green-100 text-green-800'
+                                                : 'bg-red-100 text-red-800'
+                                        }`}>
+                                            {transaction.success ? 'Success' : 'Failed'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                {loading && (
+                    <div className="fixed bottom-4 right-4 z-50">
+                        <div className="flex items-center space-x-2 bg-white dark:bg-geist-accent-800 shadow-lg rounded-lg p-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                            <span className="text-xs text-gray-500">Loading...</span>
                         </div>
-                        <button
-                            onClick={handleRefresh}
-                            disabled={loading}
-                            className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {loading ? 'Refreshing...' : 'Refresh'}
-                        </button>
                     </div>
-                </div>
-            </div>
-
-            {/* Transactions Table */}
-            <div className="bg-white dark:bg-gray-800 shadow sm:rounded-lg">
-                <div className="px-4 py-5 sm:p-6">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
-                        Transactions
-                    </h3>
-                    <div className="mt-4">
-                        {filteredTransactions.length === 0 ? (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                                No transactions found.
-                            </p>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                    <thead>
-                                        <tr>
-                                            <th className="px-6 py-3 bg-gray-50 dark:bg-gray-900 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                Date
-                                            </th>
-                                            <th className="px-6 py-3 bg-gray-50 dark:bg-gray-900 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                Type
-                                            </th>
-                                            <th className="px-6 py-3 bg-gray-50 dark:bg-gray-900 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                Amount
-                                            </th>
-                                            <th className="px-6 py-3 bg-gray-50 dark:bg-gray-900 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                USD Value
-                                            </th>
-                                            <th className="px-6 py-3 bg-gray-50 dark:bg-gray-900 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                Fee
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                        {filteredTransactions.map((tx) => (
-                                            <tr key={tx.signature}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {new Date(tx.block_time).toLocaleString()}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {tx.transaction_type}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {tx.amount.toFixed(4)} SOL
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    ${tx.usd_value.toFixed(2)}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {tx.fee.toFixed(4)} SOL
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                )}
+                {!loading && !hasMore && filteredTransactions.length > 0 && (
+                    <div className="text-center p-4 text-gray-500">
+                        No more transactions to load
                     </div>
-                </div>
+                )}
+                {!loading && filteredTransactions.length === 0 && (
+                    <div className="text-center p-4 text-gray-500">
+                        No transactions found
+                    </div>
+                )}
             </div>
         </div>
     );

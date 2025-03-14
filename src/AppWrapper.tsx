@@ -19,6 +19,8 @@ export default function AppWrapper() {
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedWallet, setSelectedWallet] = useState<string>('all');
+    const [currentTransactionPage, setCurrentTransactionPage] = useState<number>(0);
+    const [hasMore, setHasMore] = useState<boolean>(true);
     const [loadingProgress, setLoadingProgress] = useState({
         status: '',
         progress: 0
@@ -34,59 +36,58 @@ export default function AppWrapper() {
         walletNames: [] as string[]
     });
 
-    // Fetch transactions for all wallets
-    const fetchTransactions = useCallback(async () => {
-        if (!user?.id || wallets.length === 0) {
-            console.log('No user or wallets to fetch transactions for');
-            return;
-        }
+    // Initialize data loading state
+    const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
 
-        setLoading(true);
-        setError(null);
+    const fetchTransactions = useCallback(async (forceRefresh = false, page = 0) => {
+        if (!user) return;
+        
         try {
-            const allTransactions: Transaction[] = [];
-            setLoadingProgress({ status: 'Loading transactions...', progress: 0 });
-            console.log('Starting to fetch transactions for', wallets.length, 'wallets');
-
-            const walletsToFetch = selectedWallet === 'all' ? wallets : wallets.filter(w => w.wallet_address === selectedWallet);
-            
-            for (let i = 0; i < walletsToFetch.length; i++) {
-                const wallet = walletsToFetch[i];
-                try {
-                    console.log(`Fetching transactions for wallet ${wallet.wallet_name || wallet.wallet_address} (${wallet.id})`);
-                    const walletTransactions = await transactionService.getWalletTransactions(wallet.id);
-                    console.log(`Found ${walletTransactions.length} transactions for wallet ${wallet.wallet_name || wallet.wallet_address}`);
-                    allTransactions.push(...walletTransactions);
-                } catch (err) {
-                    console.error(`Failed to fetch transactions for wallet ${wallet.wallet_address}:`, err);
-                }
-                setLoadingProgress({
-                    status: `Loading transactions for ${wallet.wallet_name || wallet.wallet_address}...`,
-                    progress: ((i + 1) / walletsToFetch.length) * 100
-                });
+            if (!forceRefresh && transactions.length > 0 && page === 0) {
+                return; // Use cached transactions unless force refresh or loading more
             }
 
-            console.log('Total transactions found:', allTransactions.length);
-            // Sort transactions by block_time in descending order
-            allTransactions.sort((a, b) => {
-                const dateA = new Date(a.block_time);
-                const dateB = new Date(b.block_time);
-                return dateB.getTime() - dateA.getTime();
-            });
-
-            setTransactions(allTransactions);
+            setLoading(true);
+            setError(null);
+            
+            let result;
+            if (selectedWallet === 'all') {
+                result = await transactionService.getUserTransactions(user.id, page);
+            } else {
+                result = await transactionService.getWalletTransactions(selectedWallet, page);
+            }
+            
+            const { transactions: newTransactions, hasMore: moreAvailable } = result;
+            
+            setTransactions(prev => page === 0 ? newTransactions : [...prev, ...newTransactions]);
+            setHasMore(moreAvailable);
+            setCurrentTransactionPage(page);
         } catch (error) {
-            console.error('Failed to fetch transactions:', error);
-            setError('Failed to load transactions. Please try again.');
+            console.error('Error fetching transactions:', error);
+            setError(error instanceof ApiError ? error.message : 'Failed to fetch transactions');
         } finally {
             setLoading(false);
-            setLoadingProgress({ status: '', progress: 0 });
         }
-    }, [user?.id, wallets, selectedWallet]);
+    }, [user, selectedWallet]);
+
+    // Load more transactions when scrolling
+    const loadMore = useCallback(async () => {
+        if (!loading && hasMore) {
+            await fetchTransactions(false, currentTransactionPage + 1);
+        }
+    }, [loading, hasMore, currentTransactionPage, fetchTransactions]);
+
+    // Reset pagination when changing wallets
+    useEffect(() => {
+        setTransactions([]);
+        setCurrentTransactionPage(0);
+        setHasMore(true);
+        fetchTransactions(true, 0);
+    }, [selectedWallet]);
 
     // Fetch user's wallets
-    const fetchWallets = useCallback(async () => {
-        if (!user?.id) return;
+    const fetchWallets = useCallback(async (): Promise<Wallet[]> => {
+        if (!user?.id) return [];  // Explicit return type and empty array
 
         setLoading(true);
         setError(null);
@@ -102,15 +103,52 @@ export default function AppWrapper() {
                 walletNames: userWallets.map(w => w.wallet_name)
             });
 
-            // After fetching wallets, fetch transactions
-            await fetchTransactions();
+            return userWallets;
         } catch (error) {
             console.error('Failed to fetch wallets:', error);
             setError('Failed to fetch wallets. Please try again.');
+            return [];
         } finally {
             setLoading(false);
         }
-    }, [user?.id, fetchTransactions]);
+    }, [user?.id]);
+
+    // Initialize app data
+    const initializeAppData = useCallback(async () => {
+        if (!user || isInitialDataLoaded) return;
+
+        try {
+            setLoading(true);
+            // First fetch wallets
+            const userWallets = await fetchWallets();
+            
+            // Then fetch initial transactions if we have wallets
+            if (userWallets.length > 0) {
+                await fetchTransactions(true, 0);
+            }
+            
+            setIsInitialDataLoaded(true);
+        } catch (error) {
+            console.error('Error initializing app data:', error);
+            setError('Failed to initialize app data. Please refresh the page.');
+        } finally {
+            setLoading(false);
+        }
+    }, [user, isInitialDataLoaded, fetchWallets, fetchTransactions]);
+
+    // Load initial data when user is set
+    useEffect(() => {
+        initializeAppData();
+    }, [initializeAppData]);
+
+    // Handle navigation with data refresh
+    const handleNavigate = (page: string) => {
+        setCurrentPage(page);
+        // Refresh data when navigating to dashboard
+        if (page === 'dashboard') {
+            fetchTransactions(true, 0); // Force refresh on manual navigation
+        }
+    };
 
     // Add wallet
     const addWallet = async (address: string, name: string = '') => {
@@ -146,21 +184,11 @@ export default function AppWrapper() {
         }
     };
 
-    // Handle navigation
-    const handleNavigate = (page: string) => {
-        setCurrentPage(page);
-        // Refresh data when navigating to dashboard
-        if (page === 'dashboard') {
-            fetchTransactions();
-        }
+    // Function to check if a wallet has any transactions in our database
+    const hasWalletTransactions = (walletAddress: string) => {
+        // Return true if we have any transactions for this wallet in our state
+        return transactions.some(tx => tx.wallet_address === walletAddress);
     };
-
-    // Load wallets and transactions on mount
-    useEffect(() => {
-        if (user) {
-            fetchWallets();
-        }
-    }, [user, fetchWallets]);
 
     if (!user) {
         return <LandingPage onGetStarted={() => signIn()} />;
@@ -207,6 +235,7 @@ export default function AppWrapper() {
                     walletSaving={loading}
                     activeWalletIndex={null}
                     validateWalletAddress={(address: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)}
+                    hasWalletTransactions={hasWalletTransactions}
                 />
             )}
 
@@ -214,24 +243,23 @@ export default function AppWrapper() {
                 <TransactionDashboard
                     transactions={transactions}
                     wallets={wallets}
-                    onRefresh={fetchTransactions}
+                    onRefresh={() => fetchTransactions(true, 0)}
                     selectedWallet={selectedWallet}
                     walletMap={Object.fromEntries(wallets.map(w => [w.wallet_address, w.wallet_name]))}
                     walletAddresses={wallets.map(w => w.wallet_address)}
                     walletNames={wallets.map(w => w.wallet_name)}
-                    onWalletSelect={(wallet: string) => {
-                        setSelectedWallet(wallet);
-                        fetchTransactions();
-                    }}
+                    onWalletSelect={setSelectedWallet}
                     loading={loading}
+                    hasMore={hasMore}
+                    onLoadMore={loadMore}
                     batchProgress={{
                         totalTransactions: transactions.length,
                         processedTransactions: transactions.length,
-                        currentBatch: 1,
-                        isComplete: !loading
+                        currentBatch: currentTransactionPage + 1,
+                        isComplete: !loading && !hasMore
                     }}
                     walletProcessingStatus={walletProcessingStatus}
-                    queueWalletForProcessing={async () => fetchTransactions()}
+                    queueWalletForProcessing={async () => fetchTransactions(true, 0)}
                     validateWalletAddress={(address: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)}
                 />
             )}
