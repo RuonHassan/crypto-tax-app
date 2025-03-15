@@ -39,6 +39,7 @@ import { getConnection, validateWalletAddress, resetConnection, executeWithRetry
 import { supabase } from './supabaseClient';
 
 import WalletsPage from './components/WalletsPage';
+import OnboardingForm from './components/OnboardingForm';
 
 const CACHE_KEY_PREFIX = 'solana_tx_';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -2558,6 +2559,40 @@ function App({ user }) {
     }
   }, [selectedWallet]);
 
+  // Add effect to detect new users and start onboarding
+  useEffect(() => {
+    // When the AuthContext userProfile loads for a new user, start onboarding
+    if (authUser && userProfile && userProfile.is_new_user === true && onboardingStep === 0) {
+      console.log('Starting onboarding for new user:', authUser.id);
+      console.log('UserProfile:', { 
+        id: userProfile.id,
+        is_new_user: userProfile.is_new_user,
+        first_name: userProfile.first_name,
+        last_name: userProfile.last_name
+      });
+      
+      // Set the onboarding step and make sure landing page is hidden
+      setShowLandingPage(false);
+      setOnboardingStep(1);
+    }
+  }, [authUser, userProfile, onboardingStep]);
+
+  // Add effect to log routing and status for debugging
+  useEffect(() => {
+    if (authUser) {
+      console.log('App routing state:', { 
+        showLandingPage, 
+        onboardingStep, 
+        currentPage,
+        activeSection,
+        isNewUser: userProfile?.is_new_user,
+        userLoaded: !!authUser,
+        profileLoaded: !!userProfile,
+        currentRoute: window.location.pathname
+      });
+    }
+  }, [authUser, userProfile, showLandingPage, onboardingStep, currentPage, activeSection]);
+
   // Add effect to handle auth state changes including logout
   useEffect(() => {
     const previousUser = user || authUser;
@@ -2604,6 +2639,32 @@ function App({ user }) {
     <div className={`${appLoaded ? 'fade-in' : 'opacity-0'}`}>
       {showLandingPage ? (
         <LandingPage onGetStarted={startOnboarding} />
+      ) : onboardingStep > 0 ? (
+        // Render onboarding when onboardingStep > 0
+        <div className="min-h-screen bg-gradient-to-b from-geist-accent-100 to-white dark:from-geist-background dark:to-geist-accent-800 py-12 px-4 sm:px-6 lg:px-8">
+          <OnboardingForm
+            formData={formData}
+            setFormData={setFormData}
+            handleInputChange={handleInputChange}
+            handleWalletNameChange={handleWalletNameChange}
+            analyzeTaxes={analyzeTaxes}
+            loading={loading}
+            loadingProgress={loadingProgress}
+            walletProcessingStatus={walletProcessingStatus}
+            queueWalletForProcessing={queueWalletForProcessing}
+            user={authUser}
+            currentStep={onboardingStep}
+            goToNextStep={() => {
+              if (onboardingStep === 1) goToTraditionalIncomeStep();
+              else if (onboardingStep === 2) skipToResults();
+            }}
+            goToPreviousStep={goBackToPreviousStep}
+            onComplete={() => {
+              setOnboardingStep(0);
+              setActiveSection('dashboard');
+            }}
+          />
+        </div>
       ) : (
         <AppLayout 
           toggleUserInfoPage={toggleUserInfoPage}

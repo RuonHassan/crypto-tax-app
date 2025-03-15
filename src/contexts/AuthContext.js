@@ -53,13 +53,22 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
+        console.log('Auth event:', event); // Add debugging
+        
         setSession(session);
         setUser(session?.user ?? null);
         
         // Fetch user profile if user exists
         if (session?.user) {
-          await fetchUserProfile(session.user.id);
+          const profile = await fetchUserProfile(session.user.id);
+          
+          // Special handling for signed in users who are new (likely just verified email)
+          if (event === 'SIGNED_IN' && profile?.is_new_user === true) {
+            console.log('New user signed in after verification, navigating to app');
+            // Navigate to app with replace to prevent back navigation issues
+            navigate('/app', { replace: true });
+          }
         } else {
           setUserProfile(null);
         }
@@ -70,7 +79,7 @@ export const AuthProvider = ({ children }) => {
 
     // Cleanup subscription on unmount
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
 
   // Sign up function
   const signUp = async (email, password) => {

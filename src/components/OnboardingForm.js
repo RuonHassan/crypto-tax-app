@@ -1,6 +1,6 @@
 import React, { useState, useCallback, memo } from 'react';
 import { formatCurrency } from '../utils/formatters';
-import { addUserWallet } from '../services/databaseService';
+import { addUserWallet, updateUserProfile } from '../services/databaseService';
 
 // Create a memoized wallet input component to prevent re-renders
 const WalletInput = memo(({ 
@@ -231,12 +231,34 @@ const OnboardingForm = memo(function OnboardingForm({
   };
   
   // Function to save income data and move to the next step
-  const saveIncomeData = () => {
+  const saveIncomeData = async () => {
     setIncomeSaving(true);
     
-    // Save income data
-    setTimeout(() => {
-      setIncomeSaving(false);
+    try {
+      if (user) {
+        console.log('Completing onboarding for user:', user.id);
+        
+        // Update user profile to mark onboarding as complete
+        const { success, error } = await updateUserProfile(user.id, {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          salary: formData.salary || 0,
+          stockIncome: formData.stockIncome || 0,
+          realEstateIncome: formData.realEstateIncome || 0,
+          dividends: formData.dividends || 0,
+          is_new_user: false // Mark onboarding as complete
+        });
+        
+        if (!success) {
+          console.error('Error updating profile:', error);
+          alert('There was an issue completing onboarding. Please try again.');
+          setIncomeSaving(false);
+          return;
+        }
+        
+        console.log('Onboarding completed successfully');
+      }
+      
       // On completion, go to dashboard
       if (onComplete) {
         onComplete();
@@ -244,7 +266,12 @@ const OnboardingForm = memo(function OnboardingForm({
         // If onComplete is not available, advance to the next step
         goToTraditionalIncomeStep();
       }
-    }, 500);
+    } catch (error) {
+      console.error('Error completing onboarding:', error);
+      alert('There was an issue completing onboarding. Please try again.');
+    } finally {
+      setIncomeSaving(false);
+    }
   };
   
   const advanceToIncomeForm = () => {
